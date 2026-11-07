@@ -121,37 +121,31 @@ function parseText(t,file){
  // "Ký hiệu" ở dòng trên; giá trị ký hiệu ngay cạnh/sau nhãn.
  // "Số" ở dòng dưới; dãy số ngay cạnh/sau nhãn. Hỗ trợ PDF text, XML text và OCR.
  // Identify the invoice header cluster, not arbitrary digit strings across the whole PDF.
- const titleIndex=lines.findIndex(x=>/HÓA ĐƠN|HOA DON|VAT Invoice/i.test(x));
- const headerFrom=titleIndex>=0?Math.max(0,titleIndex-2):0;
- const headerTo=titleIndex>=0?Math.min(lines.length,titleIndex+18):Math.min(lines.length,45);
+ const titleIndex=lines.findIndex(x=>/HÓA ĐƠN|HOA DON/i.test(x));
+ const headerFrom=titleIndex>=0?Math.max(0,titleIndex-15):0;
+ const headerTo=titleIndex>=0?Math.min(lines.length,titleIndex+13):Math.min(lines.length,45);
  const headerLines=lines.slice(headerFrom,headerTo);
  const headerText=headerLines.join(' ');
  const seriesLabelAt=headerLines.findIndex(x=>/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i.test(x));
  const numberLabelAt=headerLines.findIndex(x=>/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?\s*$/i.test(x)||/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?\s*[0-9]/i.test(x));
- const nearestCandidate=(labelIndex,rx,exclude=[])=>{
+ const nearestCandidate=(labelIndex,rx)=>{
   if(labelIndex<0)return '';
   const found=[];
   for(let i=Math.max(0,labelIndex-5);i<=Math.min(headerLines.length-1,labelIndex+5);i++){
    const m=headerLines[i].match(rx);
-   if(!m)continue;
-   const v=m[1]||m[0];
-   if(exclude.some(x=>x.test(v)))continue;
-   found.push({v,d:Math.abs(i-labelIndex),i});
+   if(m)found.push({v:m[1]||m[0],d:Math.abs(i-labelIndex),i});
   }
   found.sort((x,y)=>x.d-y.d||x.i-y.i);
   return found[0]?.v||'';
  };
- let fullSeries=first(headerText,[/(?:Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9][A-Z0-9]{3,17})/i]);
- if(!fullSeries){
-  const si=seriesLabelAt;
-  fullSeries=nearestCandidate(si,/\b([0-9][A-Z]{1,4}[0-9]{2}[A-Z0-9]{1,10})\b/i);
- }
- // Number must be a 3-25 digit sequence close to the "Số" label and inside the invoice title block.
- // Ignore years, dates, tax codes, account numbers and the series value.
- let number=first(headerText,[/(?:Số(?:\s*\(No\))?)\s*[:：]?\s*([0-9]{3,25})\b/i]);
+ let fullSeries=nearestCandidate(seriesLabelAt,/\b([0-9][A-Z]{1,4}[0-9]{2}[A-Z0-9]{1,10})\b/i);
+ if(!fullSeries)fullSeries=first(headerText,[/(?:Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9][A-Z0-9]{3,17})/i,/\b([0-9][A-Z]{1,4}[0-9]{2}[A-Z0-9]{1,10})\b/i]);
+ let number=nearestCandidate(numberLabelAt,/\b([0-9]{3,25})\b/);
+ if(number&&/^20\d{2}$/.test(number))number='';
  if(!number){
-  const ni=numberLabelAt>=0?numberLabelAt:headerLines.findIndex(x=>/^Số(?:\s*\(No\))?\s*[:：]?$/i.test(x));
-  number=nearestCandidate(ni,/\b([0-9]{3,25})\b/i,[/^20\d{2}$/]);
+  const labelText=headerLines.slice(Math.max(0,numberLabelAt-2),Math.min(headerLines.length,numberLabelAt+6)).join(' ');
+  const m=labelText.match(/(?:Số(?:\s*\(No\))?)\s*[:：]?\s*([0-9]{5,25})\b/i);
+  if(m)number=m[1];
  }
  const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
  const series=fullSeries&&formCode?fullSeries.slice(1):fullSeries;
