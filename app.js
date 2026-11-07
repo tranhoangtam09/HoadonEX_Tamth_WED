@@ -88,26 +88,26 @@ function parseText(t,file){
  // Nhận diện cụm tiêu đề hóa đơn theo vị trí tương đối:
  // "Ký hiệu" ở dòng trên; giá trị ký hiệu ngay cạnh/sau nhãn.
  // "Số" ở dòng dưới; dãy số ngay cạnh/sau nhãn. Hỗ trợ PDF text, XML text và OCR.
- const headerStart=lines.findIndex(x=>/Ký hiệu(?:\\s*\\(Sign\\))?|Ký hiệu hóa đơn/i.test(x));
+ const headerStart=lines.findIndex(x=>/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i.test(x));
  let fullSeries='',number='';
  if(headerStart>=0){
   const headerRows=lines.slice(headerStart,Math.min(lines.length,headerStart+7));
   for(let i=0;i<headerRows.length;i++){
    const line=headerRows[i];
    if(!fullSeries){
-    const m=line.match(/Ký hiệu(?:\\s*\\(Sign\\))?|Ký hiệu hóa đơn/i);
+    const m=line.match(/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i);
     if(m){
      const after=line.slice(m.index+m[0].length);
-     let v=after.match(/[：:]?\\s*([0-9][A-Z0-9]{3,17})/i);
-     if(!v&&headerRows[i+1])v=headerRows[i+1].match(/^\\s*([0-9][A-Z0-9]{3,17})\\s*$/i);
+     let v=after.match(/[：:]?\s*([0-9][A-Z0-9]{3,17})/i);
+     if(!v&&headerRows[i+1])v=headerRows[i+1].match(/^\s*([0-9][A-Z0-9]{3,17})\s*$/i);
      if(v)fullSeries=v[1].toUpperCase();
     }
    }
    if(!number){
-    const m=line.match(/(?:^|\\s)Số(?:\\s*\\(No\\))?\\s*[:：]?\\s*([0-9]{3,25})/i);
+    const m=line.match(/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?\s*([0-9]{3,25})/i);
     if(m)number=m[1];
-    else if(/(?:^|\\s)Số(?:\\s*\\(No\\))?\\s*[:：]?\\s*$/i.test(line)&&headerRows[i+1]){
-     const v=headerRows[i+1].match(/^\\s*([0-9]{3,25})\\s*$/);
+    else if(/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?\s*$/i.test(line)&&headerRows[i+1]){
+     const v=headerRows[i+1].match(/^\s*([0-9]{3,25})\s*$/);
      if(v)number=v[1];
     }
    }
@@ -116,9 +116,9 @@ function parseText(t,file){
  // Fallback chỉ trong vùng tiêu đề gần cụm "Ký hiệu"; không quét toàn văn bản để lấy số tùy ý.
  if(!fullSeries){
   const headerText=lines.slice(Math.max(0,headerStart),Math.min(lines.length,headerStart+7)).join(' ');
-  fullSeries=first(headerText,[/(?:Ký hiệu(?:\\s*\\(Sign\\))?|Ký hiệu hóa đơn)\\s*[:：]?\\s*([0-9][A-Z0-9]{3,17})/i]);
+  fullSeries=first(headerText,[/(?:Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9][A-Z0-9]{3,17})/i]);
  }
- const formCode=fullSeries&&/^\\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
+ const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
  const series=fullSeries&&formCode?fullSeries.slice(1):fullSeries;
  const orderNumber=first(raw,[/(?:Đơn\s*đặt\s*hàng|Purchase\s*order|PO\s*No\.?)\s*[:：]?\s*([A-Z0-9/-]{2,30})/i]);
  const dateRaw=first(raw,[/(?:Ngày(?:\s*\(Date\))?)\s*[:：]?\s*(\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}|\d{1,2}[/. -]\d{1,2}[/. -]\d{4})/i]);
