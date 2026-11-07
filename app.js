@@ -123,43 +123,42 @@ function parseText(t,file){
  // Identify the invoice header cluster, not arbitrary digit strings across the whole PDF.
  // Read the three invoice identifiers only from explicit labels in the invoice heading.
  // Never infer invoice number from a nearby arbitrary number (e.g. address 406).
- // Robust header-cluster parser: use explicit labels as anchors.
- // PDF text extraction may reorder visual rows, so allow the value within a small
- // neighborhood around each label, but never search arbitrary numbers globally.
- const headerLines=lines.slice(0,Math.min(lines.length,60));
+ // Robust invoice identifier parser anchored to the labels, independent of their
+ // position within the title row. PDF.js can put title, label and value in one row
+ // or split them into adjacent rows / text items.
+ const headerLines=lines.slice(0,Math.min(lines.length,80));
  const seriesLabel=/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i;
- const numberLabel=/Số(?:\s*\(No\))?/i;
  let fullSeries='',number='';
- const seriesRx=/\b([0-9][A-Z][A-Z0-9]{2,17})\b/i;
- const digitsRx=/\b([0-9]{5,25})\b/;
+ const seriesValue=/\b([0-9][A-Z][A-Z0-9]{2,17})\b/i;
+ const numberValue=/\b([0-9]{5,25})\b/;
  for(let i=0;i<headerLines.length&&!fullSeries;i++){
   const m=seriesLabel.exec(headerLines[i]);
   if(!m)continue;
-  // First prefer the contiguous code after the label on the same line.
   const tail=headerLines[i].slice(m.index+m[0].length);
-  let v=tail.match(/^[\s:：-]*([0-9][A-Z][A-Z0-9]{2,17})\b/i);
-  // If PDF.js separated the label and its value into different text rows,
-  // search only the next few header rows for a series-shaped alphanumeric code.
+  let v=tail.match(/[:：\s-]*([0-9][A-Z][A-Z0-9]{2,17})\b/i);
   if(!v){
-   for(let j=i+1;j<Math.min(headerLines.length,i+7);j++){
-    v=headerLines[j].match(/^\s*([0-9][A-Z][A-Z0-9]{2,17})\s*$/i);
-    if(v)break;
+   for(let j=i+1;j<Math.min(headerLines.length,i+9);j++){
+    const candidate=headerLines[j].match(/^\s*([0-9][A-Z][A-Z0-9]{2,17})\s*$/i);
+    if(candidate){v=candidate;break;}
    }
   }
   if(v)fullSeries=v[1].toUpperCase();
  }
  for(let i=0;i<headerLines.length&&!number;i++){
-  const m=numberLabel.exec(headerLines[i]);
-  if(!m)continue;
-  const tail=headerLines[i].slice(m.index+m[0].length);
-  let v=tail.match(/^[\s:：-]*([0-9]{5,25})\s*$/);
-  if(!v){
-   for(let j=i+1;j<Math.min(headerLines.length,i+7);j++){
-    const candidate=headerLines[j].match(/^\s*([0-9]{5,25})\s*$/);
-    if(candidate){v=candidate;break;}
+  const line=headerLines[i];
+  const re=/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?/ig;
+  let m;
+  while((m=re.exec(line))!==null){
+   const tail=line.slice(m.index+m[0].length);
+   let v=tail.match(/^[\s:：-]*([0-9]{5,25})\b/);
+   if(!v){
+    for(let j=i+1;j<Math.min(headerLines.length,i+9);j++){
+     const candidate=headerLines[j].match(/^\s*([0-9]{5,25})\s*$/);
+     if(candidate){v=candidate;break;}
+    }
    }
+   if(v){number=v[1];break;}
   }
-  if(v)number=v[1];
  }
  const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
  const series=fullSeries&&formCode?fullSeries.slice(1):fullSeries;
