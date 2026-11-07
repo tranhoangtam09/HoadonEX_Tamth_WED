@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#102b46">
+  <title>HOA DON EX — TAMTH WEB</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-mark">EX</div>
+    <div><div class="eyebrow">TAMTH · WEB EDITION</div><h1>HOA DON EX</h1><p>Đọc hóa đơn · Kiểm tra dữ liệu · Xuất Excel</p></div>
+    <span class="local-tag">XỬ LÝ TRÊN TRÌNH DUYỆT</span>
+  </header>
+
+  <main class="container">
+    <section class="hero">
+      <div><span class="eyebrow light">WORKSPACE ĐỘC LẬP</span><h2>Quản lý hóa đơn<br><em>chính xác, có kiểm soát.</em></h2>
+      <p>Tải PDF, XML hoặc hình ảnh. Hệ thống ưu tiên dữ liệu XML và lớp văn bản PDF; OCR hỗ trợ tài liệu scan. Luôn rà soát trước khi xuất.</p></div>
+      <div class="hero-stat"><strong id="fileCount">0</strong><span>TỆP ĐÃ THÊM</span></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head"><div><span class="step">01</span><h2>Thêm hóa đơn</h2></div><span class="muted">PDF · XML · JPG · PNG</span></div>
+      <label class="dropzone" id="dropzone">
+        <input id="fileInput" type="file" accept=".pdf,.xml,.jpg,.jpeg,.png,application/pdf,application/xml,image/*" multiple>
+        <span class="upload-icon">↑</span><strong>Kéo thả tệp vào đây</strong><span>hoặc nhấn để chọn nhiều hóa đơn cùng lúc</span>
+      </label>
+      <div class="toolbar"><button class="btn btn-primary" id="processBtn">Phân tích hóa đơn</button><button class="btn btn-quiet" id="clearBtn">Xóa danh sách</button><span id="status" class="status" role="status">Chưa có tệp.</span></div>
+      <div id="fileList" class="file-list"></div>
+    </section>
+
+    <section class="panel">
+      <div class="section-head"><div><span class="step">02</span><h2>Kiểm tra và hiệu chỉnh</h2></div><span class="muted">Bắt buộc kiểm tra ô đánh dấu cảnh báo</span></div>
+      <div class="table-wrap"><table><thead><tr><th>Tên tệp</th><th>Mã số thuế người bán</th><th>Đơn vị phát hành</th><th>Mẫu số</th><th>Ký hiệu</th><th>Số hóa đơn</th><th>Ngày hóa đơn</th><th>Tổng tiền</th><th>Trạng thái</th></tr></thead><tbody id="resultsBody"><tr><td colspan="9" class="empty">Chưa có dữ liệu. Hãy thêm và phân tích hóa đơn.</td></tr></tbody></table></div>
+      <p class="hint">Các trường có nền vàng cần kiểm tra. Không tự suy đoán dữ liệu thiếu; người dùng có thể nhấp đúp ô để hiệu chỉnh.</p>
+    </section>
+
+    <section class="panel">
+      <div class="section-head"><div><span class="step">03</span><h2>Kết xuất dữ liệu</h2></div><span class="muted">Tạo bảng kê Excel</span></div>
+      <div class="export-grid">
+        <div class="export-card"><div class="file-badge">XLSX</div><h3>Bảng kê hóa đơn chuyển khoản VND</h3><p>Xuất dữ liệu hóa đơn đã kiểm tra sang bảng kê chuyển khoản.</p><button class="btn btn-primary exportBtn" data-type="transfer">Xuất Excel</button></div>
+        <div class="export-card"><div class="file-badge">XLSX</div><h3>Bảng kê hóa đơn bù đắp VND</h3><p>Xuất dữ liệu hóa đơn đã kiểm tra sang bảng kê bù đắp.</p><button class="btn btn-primary exportBtn" data-type="offset">Xuất Excel</button></div>
+      </div>
+      <p class="hint">Bản khởi tạo xuất bảng dữ liệu chuẩn. Để giữ nguyên định dạng của biểu mẫu Excel nghiệp vụ, cần nạp đúng hai file mẫu đang sử dụng.</p>
+    </section>
+
+    <footer><span>HOA DON EX · TAMTH WEB</span><span>Dữ liệu được xử lý cục bộ trong phiên trình duyệt; không tự động tải lên máy chủ.</span></footer>
+  </main>
+</body>
+</html>
