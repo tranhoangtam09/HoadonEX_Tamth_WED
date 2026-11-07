@@ -164,7 +164,7 @@ async function readFile(file){const ext=file.name.split('.').pop().toLowerCase()
 
 function classifyInvoice(r){
  const t=String(r.raw||'').toLowerCase();
- if(/meinvoice|misa\.com\.vn|mã tra cứu hóa đơn/.test(t))return 'MISA / MeInvoice';
+ if(/meinvoice|misa\.com\.vn|phần mềm misa/.test(t))return 'MISA / MeInvoice';
  if(/einvoice\.fast\.com\.vn|fast software|mã tra cứu hóa đơn/.test(t))return 'FAST eInvoice';
  if(/vnpt|einvoice\.vnpt/.test(t))return 'VNPT Invoice';
  if(/viettel|sinvoice/.test(t))return 'Viettel S-Invoice';
