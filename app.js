@@ -381,19 +381,7 @@ function render(){
  });
 }
 async function exportWorkbook(kind){
- const strict=$('#strictExport')?.checked===true;
- if(strict){
-  const required=kind==='transfer'?['buyerTax','buyer','series','number','date','amount']:['sellerTax','seller','series','number','date','amount'];
-  const blocking=[];
-  state.rows.forEach((r,i)=>{
-   const missing=required.filter(k=>!clean(r[k]));
-   if(missing.length)blocking.push('Hồ sơ '+(i+1)+': thiếu '+missing.join(', '));
-   if(r.duplicateOf)blocking.push('Hồ sơ '+(i+1)+': hóa đơn trùng');
-   if((r.checks||[]).some(x=>/không khớp|không tồn tại|không hợp lệ|MST đơn vị phát hành phần mềm/i.test(x)))blocking.push('Hồ sơ '+(i+1)+': có cảnh báo trọng yếu');
-  });
-  if(blocking.length){status('Chế độ nghiêm ngặt: còn dữ liệu cần xác minh.');alert('Cần xác minh trước khi xuất:\n\n'+blocking.slice(0,12).join('\n'));return;}
-  if(!confirm('Đã kiểm tra các trường bắt buộc. Bạn xác nhận dữ liệu đã được đối chiếu với hóa đơn gốc?'))return;
- }
+ // Flexible export is the default and only mode: missing invoice fields remain blank.
  return exportWorkbookBase(kind);
 }
 
