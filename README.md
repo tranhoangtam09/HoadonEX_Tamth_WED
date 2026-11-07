@@ -78,3 +78,11 @@ Parser đã được tăng cường để:
 - QR decode dùng thư viện jsQR qua CDN. Ứng dụng vẫn chạy nếu không tải được thư viện, nhưng sẽ không có dữ liệu QR.
 
 **Giới hạn kiểm thử:** Chưa thể xác nhận độ chính xác đầu-cuối của OCR/QR trên mọi hóa đơn chỉ bằng kiểm tra mã nguồn. Cần chạy bộ PDF/XML thực tế trên GitHub Pages và so sánh từng trường với dữ liệu chuẩn trước khi sử dụng nghiệp vụ.
+
+
+## Chức năng bổ sung: xuất Excel linh hoạt và gộp PDF
+- Mặc định xuất Excel ở chế độ linh hoạt: không bắt buộc đủ tất cả trường; dữ liệu thiếu được để trống, không tự suy đoán.
+- Có thể bật tùy chọn “Kiểm tra nghiêm ngặt” để chặn xuất khi thiếu trường cốt lõi, có hóa đơn trùng hoặc cảnh báo trọng yếu.
+- Gộp tối đa 10 tệp PDF/JPG/JPEG/PNG/WEBP thành một PDF; người dùng chọn tệp từ máy tính, xóa tệp khỏi danh sách và đổi thứ tự trước khi gộp.
+- PDF nhiều trang được giữ nguyên; mỗi ảnh được chuyển thành một trang PDF. Dùng pdf-lib trên trình duyệt, không tải tệp lên máy chủ.
+- Cần Internet để tải thư viện pdf-lib từ CDN. PDF có mật khẩu/mã hóa hoặc bị lỗi có thể không gộp được.
