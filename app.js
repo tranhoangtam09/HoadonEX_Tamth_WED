@@ -86,36 +86,35 @@ function parseText(t,file){
   buyerTax=taxAtLabel(buyerPersonIdx,Math.min(lines.length,buyerPersonIdx+15));
  }
  const series=first(raw,[/(?:Ký hiệu\s*(?:\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9A-Z]{4,18})/i]);
- // Invoice number must be resolved from the invoice header near its series.
- // Never use a generic "Số 472 ..." address match as a fallback.
+ // Invoice number is the digit sequence printed BELOW the invoice series.
+ // Only inspect text AFTER the series label/value; never search the address/header before it.
+ // This prevents house number (e.g. 472 Nguyễn Huệ), phone, account and PO numbers
+ // from being mistaken for the invoice number.
  let number='';
- const headerPos=series?raw.toUpperCase().indexOf(series.toUpperCase()):-1;
- if(headerPos>=0){
-  const left=raw.slice(Math.max(0,headerPos-180),headerPos);
-  const right=raw.slice(headerPos,headerPos+320);
-  const header=left+'\n'+right;
-  const labelled=header.match(/(?:Số\s*(?:\(No\))?|Số hóa đơn|Invoice\s*No\.?)\s*[:：]?\s*([0-9]{3,25})/i);
-  if(labelled)number=labelled[1];
-  if(!number){
-   const linesNear=header.split(/\n+/).map(x=>x.trim()).filter(Boolean);
-   const si=linesNear.findIndex(x=>x.toUpperCase().includes(series.toUpperCase()));
-   const candidates=[];
-   for(let d=1;d<=4;d++){if(si>=0&&linesNear[si+d])candidates.push(linesNear[si+d]);if(si>=0&&linesNear[si-d])candidates.push(linesNear[si-d]);}
-   for(const line of candidates){
-    if(/(?:MST|mã số thuế|địa chỉ|điện thoại|tài khoản|nguyễn huệ)/i.test(line))continue;
-    const m=line.match(/^\s*([0-9]{3,25})\s*$/)||line.match(/(?:Số|No\.?)[\s:：]+([0-9]{3,25})\s*$/i);
-    if(m){number=m[1];break;}
+ if(series){
+  const pos=raw.toUpperCase().indexOf(series.toUpperCase());
+  if(pos>=0){
+   const below=raw.slice(pos+series.length,pos+Math.min(260,raw.length-pos));
+   const rows=below.split(/\n+/).map(x=>x.replace(/[ \t]+/g,' ').trim()).filter(Boolean);
+   for(let i=0;i<Math.min(rows.length,6);i++){
+    // Explicit "Số:" label below the series; value may be on the same or next extracted line.
+    const label=rows[i].match(/^Số\s*(?:\(No\))?\s*[:：]?\s*(.*)$/i);
+    if(!label)continue;
+    const same=label[1].match(/^([0-9]{3,25})\b/);
+    if(same){number=same[1];break;}
+    for(let j=i+1;j<Math.min(rows.length,i+3);j++){
+     const next=rows[j].match(/^([0-9]{3,25})\s*$/);
+     if(next){number=next[1];break;}
+     // Stop if another field label intervenes; do not roam into body/address/order details.
+     if(/^(?:Ngày|Date|Mã|Địa chỉ|Tên|Họ tên|Hình thức|STT|Đơn vị|Ký bởi)/i.test(rows[j]))break;
+    }
+    if(number)break;
    }
-  }
- }
- // Fallback is restricted to explicit invoice-number labels; do not match "Số nhà", account or address.
- if(!number){
-  for(let i=0;i<lines.length;i++){
-   if(!/^(?:Số\s*(?:\(No\))?|Số hóa đơn|Invoice\s*No\.?)\s*[:：]?\s*$/i.test(lines[i]))continue;
-   for(let j=i+1;j<Math.min(lines.length,i+3);j++){
-    const m=lines[j].match(/^([0-9]{3,25})$/);if(m){number=m[1];break;}
+   // Some PDF text layers place "Ký hiệu" and "Số" on the same line.
+   if(!number){
+    const sameLine=below.match(/(?:^|\s)Số\s*(?:\(No\))?\s*[:：]\s*([0-9]{3,25})\b/i);
+    if(sameLine)number=sameLine[1];
    }
-   if(number)break;
   }
  }
  const orderNumber=first(raw,[/(?:Đơn\s*đặt\s*hàng|Purchase\s*order|PO\s*No\.?)\s*[:：]?\s*([A-Z0-9/-]{2,30})/i]);
