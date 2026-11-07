@@ -222,5 +222,157 @@ function addFiles(files){for(const f of files)if(!state.files.some(x=>x.name===f
 async function process(){if(!state.files.length){status('Hãy chọn ít nhất một hóa đơn.');return;}$('#processBtn').disabled=true;const fresh=[];let success=0;try{for(let i=0;i<state.files.length;i++){const f=state.files[i];status('Đang xử lý '+f.name+' ('+(i+1)+'/'+state.files.length+')');try{const r=await readFile(f);if(!r.file)r.file=f.name;fresh.push(r);success++;}catch(e){fresh.push({file:f.name,error:e.message});}}if(success){state.rows=fresh.map(r=>r.error?r:professionalize(r));detectDuplicates(state.rows);state.rows.forEach(r=>{if(!r.error){r.checks=[...new Set([...(r.checks||[]),...(r.duplicateOf?['Trùng số hóa đơn trong lô']:[])])];r.confidence=scoreInvoice(r);}});render();status('Đã xử lý '+success+'/'+fresh.length+' tệp. Đã chạy kiểm tra cấu trúc, số tiền và trùng lặp. Vui lòng rà soát cảnh báo.');}else{status('Lô mới không đọc được tệp nào; giữ nguyên lô dữ liệu trước đó.');}}finally{$('#processBtn').disabled=false;}}
 function loadTemplate(kind,file){if(!file)return;state.templates[kind]=file;$('#'+kind+'TemplateStatus').textContent='Đã chọn: '+file.name;}
 async function exportWorkbook(kind){const file=state.templates[kind];if(!file){status('Bạn cần tải lên file Excel mẫu gốc trước khi xuất.');return;}if(!state.rows.length){status('Chưa có dữ liệu hóa đơn.');return;}if(!window.ExcelJS){status('Không tải được ExcelJS.');return;}try{status('Đang nạp và điền biểu mẫu gốc…');const wb=new ExcelJS.Workbook();await wb.xlsx.load(await file.arrayBuffer());const sheetName=kind==='transfer'?'Bảng kê hóa đơn':'Bảng kê hóa đơn GN bù đắp';const ws=wb.getWorksheet(sheetName);if(!ws)throw Error('Không tìm thấy sheet "'+sheetName+'" trong mẫu.');const start=3;const templateRow=ws.getRow(start);for(let r=start;r<=ws.rowCount;r++){const row=ws.getRow(r);for(let c=1;c<=ws.columnCount;c++){if(row.getCell(c).value!==undefined)row.getCell(c).value=null;}}const records=state.rows;records.forEach((x,i)=>{const rn=start+i,row=ws.getRow(rn);if(rn>start){for(let c=1;c<=ws.columnCount;c++){const src=templateRow.getCell(c),dst=row.getCell(c);if(src.style)dst.style=structuredClone(src.style);if(src.numFmt)dst.numFmt=src.numFmt;}}let vals;if(kind==='transfer'){vals=[i+1,x.buyerTax||'',x.buyer||'',x.account||'',x.formCode||'',x.series||'',x.number||'',x.date||'',x.amount?Number(x.amount):null,x.currency||'VND',x.item||'',x.debtAmount?Number(money(x.debtAmount)):null];}else{vals=[i+1,x.sellerTax||'',x.seller||'',x.formCode||'',x.series||'',x.number||'',x.date||'',x.amount?Number(x.amount):null,x.currency||'VND',x.item||'',x.debtAmount?Number(money(x.debtAmount)):null,x.paidDate||'',x.paidAmount?Number(money(x.paidAmount)):null];}vals.forEach((v,j)=>{row.getCell(j+1).value=v;});row.commit();});const out=await wb.xlsx.writeBuffer(),blob=new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=kind==='transfer'?'Bang_ke_hoa_don_chuyen_khoan_VND.xlsx':'Bang_ke_hoa_don_bu_dap_VND.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);status('Đã xuất Excel theo workbook mẫu gốc. Các trường không có dữ liệu vẫn để trống.');}catch(e){console.error(e);status('Không thể xuất: '+e.message);}}
+
+/* Accuracy upgrade v2: source-aware parsing, QR cross-check, strict export gate. */
+function xmlField(root, aliases, scope){
+ const norm=s=>(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+ const wanted=aliases.map(norm), base=scope||root;
+ const nodes=[base,...base.getElementsByTagName('*')];
+ for(const n of nodes){if(wanted.includes(norm(n.localName||n.nodeName))){const v=clean(n.textContent);if(v)return v;}}
+ return '';
+}
+function parseXml(xml,file){
+ const doc=new DOMParser().parseFromString(xml,'application/xml');
+ if(doc.querySelector('parsererror'))throw Error('XML không hợp lệ hoặc bị lỗi cấu trúc.');
+ const root=doc.documentElement,all=[...root.getElementsByTagName('*')];
+ const findSection=names=>all.find(n=>names.includes((n.localName||n.nodeName).toLowerCase()));
+ const sellerSec=findSection(['nban','seller','thongtinnguoiban','sellerinfo']);
+ const buyerSec=findSection(['nmua','buyer','thongtinnguoimua','buyerinfo']);
+ const sellerTax=xmlField(root,['mstnb','mstnguoiban','taxcode','taxid'],sellerSec)||xmlField(root,['mstnb','mstnguoiban']);
+ const buyerTax=xmlField(root,['mstnmua','mstnguoimua'],buyerSec)||xmlField(root,['mstnmua','mstnguoimua']);
+ const series=xmlField(root,['khhdon','kyhieu','invoiceSeries','series']);
+ const number=xmlField(root,['shdon','sohoadon','invoiceNumber','invoiceno']);
+ const date=xmlField(root,['nlap','ngaylap','ngayhoadon','invoicedate','issuedate']);
+ const total=xmlField(root,['tgtttbso','tgtcthue','tongtienthanhtoan','totalpayment','totalamount','amountdue']);
+ const data={file,sellerTax:normalizeTax(sellerTax),seller:xmlField(root,['ten','tennguoiban','sellername','tendv'],sellerSec),buyerTax:normalizeTax(buyerTax),buyer:xmlField(root,['ten','tennguoimua','buyername','tenkh'],buyerSec),formCode:'',series,number,date:dateNorm(date),amount:money(total),currency:xmlField(root,['dvtte','loaitien','currency'])||'VND',item:xmlField(root,['tenhang','tenhh','tenhanghoa','description','ten']),account:'',debtAmount:'',paidDate:'',paidAmount:'',raw:root.textContent,sourceMode:'XML',evidence:{}};
+ data.formCode=data.series?(data.series.match(/^\d/)||[''])[0]:'';
+ const fallback=parseText(root.textContent,file);
+ for(const k of ['sellerTax','seller','buyerTax','buyer','series','number','date','amount','item'])if(!data[k]&&fallback[k])data[k]=fallback[k];
+ data.evidence=buildEvidence(data);
+ return data;
+}
+function qrExtract(text){
+ const s=String(text||'');let o={raw:s};
+ const pairs=[
+  ['sellerTax',/(?:MST|Mã số thuế|tax(?:code|id)?)[=:;\s]+([0-9]{10}(?:-[0-9]{3})?)/i],
+  ['number',/(?:SHDon|Số hóa đơn|Invoice(?:No)?)[=:;\s]+([0-9]{3,25})/i],
+  ['series',/(?:Ký hiệu|KHHD|Series)[=:;\s]+([0-9A-Z]{4,20})/i],
+  ['date',/(?:Ngày lập|NLap|Date)[=:;\s]+(\d{1,2}[/. -]\d{1,2}[/. -]\d{4}|\d{4}-\d{2}-\d{2})/i],
+  ['amount',/(?:Tổng tiền thanh toán|Tổng cộng|Amount|Total)[=:;\s]+([0-9][0-9., ]{2,})/i]
+ ];
+ for(const [k,re] of pairs){const m=s.match(re);if(m)o[k]=k==='date'?dateNorm(m[1]):k==='amount'?money(m[1]):k==='sellerTax'?normalizeTax(m[1]):clean(m[1]);}
+ try{const j=JSON.parse(s);const keys={sellerTax:['sellerTax','mst','mstnb','taxCode'],number:['number','shdon','invoiceNumber'],series:['series','khhdon','kyhieu'],date:['date','nlap','invoiceDate'],amount:['amount','tgtttbso','totalAmount']};for(const [k,ks] of Object.entries(keys))if(!o[k])for(const key of ks)if(j[key]){o[k]=k==='date'?dateNorm(j[key]):k==='amount'?money(j[key]):clean(j[key]);break;}}catch(_){}
+ return o;
+}
+function decodeQrCanvas(canvas){
+ if(!window.jsQR)return null;
+ try{const ctx=canvas.getContext('2d',{willReadFrequently:true}),im=ctx.getImageData(0,0,canvas.width,canvas.height),q=jsQR(im.data,im.width,im.height,{inversionAttempts:'attemptBoth'});return q?.data||null;}catch(_){return null;}
+}
+function buildEvidence(r){
+ const raw=String(r.raw||r.sourceText||''),out={};
+ const tests={sellerTax:/Mã\s*số\s*thuế|MST|Tax\s*code/i,seller:/Đơn vị bán hàng|Tên người bán|Seller name/i,buyerTax:/Mã\s*số\s*thuế|MST/i,buyer:/Tên đơn vị|Tên người mua|Buyer/i,series:/Ký hiệu|Series/i,number:/Số hóa đơn|Invoice\s*No/i,date:/Ngày|Date/i,amount:/Tổng.*thanh toán|Total amount/i};
+ for(const k of Object.keys(tests)){const v=clean(r[k]);let idx=v?raw.toLowerCase().indexOf(v.toLowerCase()):-1;if(idx<0){const m=tests[k].exec(raw);idx=m?m.index:-1;}out[k]=idx>=0?raw.slice(Math.max(0,idx-70),Math.min(raw.length,idx+180)).replace(/\s+/g,' ').trim():'Không tìm thấy đoạn nguồn rõ ràng';}
+ return out;
+}
+async function scanQrFromPdf(pdf,file){
+ if(!window.jsQR)return [];
+ const found=[];
+ for(let p=1;p<=Math.min(pdf.numPages,3);p++){
+  const page=await pdf.getPage(p),vp=page.getViewport({scale:2}),canvas=document.createElement('canvas');
+  canvas.width=vp.width;canvas.height=vp.height;
+  await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;
+  const value=decodeQrCanvas(canvas);if(value)found.push({page:p,text:value,...qrExtract(value)});
+ }
+ return found;
+}
+async function readPdf(file){
+ if(!window.pdfjsLib)throw Error('Không tải được PDF.js.');
+ const pdf=await pdfjsLib.getDocument({data:new Uint8Array(await file.arrayBuffer())}).promise;
+ let text='';
+ for(let p=1;p<=pdf.numPages;p++){
+  const page=await pdf.getPage(p),content=await page.getTextContent(),items=content.items.filter(x=>x.str&&x.str.trim());
+  const lines=[];
+  for(const it of items){const y=Math.round(it.transform[5]/3)*3;let line=lines.find(x=>Math.abs(x.y-y)<=3);if(!line){line={y,items:[]};lines.push(line);}line.items.push(it);}
+  for(const line of lines.sort((a,b)=>b.y-a.y))text+=line.items.sort((a,b)=>a.transform[4]-b.transform[4]).map(x=>x.str).join(' ')+'\n';
+ }
+ let candidate=parseText(text,file.name);candidate.sourceMode=text.replace(/\s/g,'').length>60?'PDF text':'PDF scan';
+ const qr=await scanQrFromPdf(pdf,file);
+ candidate.qrEvidence=qr;
+ if(candidate.sourceMode==='PDF scan'||(candidate.checks||[]).length>1||candidate.confidence<85){
+  if(!window.Tesseract)throw Error('PDF scan hoặc dữ liệu thiếu; OCR chưa tải được.');
+  let ocrText='',scores=[];
+  for(let p=1;p<=pdf.numPages;p++){const page=await pdf.getPage(p),vp=page.getViewport({scale:2.8}),canvas=document.createElement('canvas');canvas.width=vp.width;canvas.height=vp.height;await page.render({canvasContext:canvas.getContext('2d'),viewport:vp}).promise;const result=await ocrCanvas(makeCanvas(canvas,1,true),file.name+' · trang '+p+'/'+pdf.numPages);ocrText+='\n'+result.text;scores.push(result.ocrConfidence);}
+  const ocr=parseText(ocrText,file.name);ocr.ocrConfidence=Math.round(scores.reduce((a,b)=>a+b,0)/Math.max(1,scores.length));ocr.sourceMode='OCR tăng cường';
+  candidate=mergeCandidates(candidate,ocr);candidate.qrEvidence=qr;
+ }
+ return reconcileQr(candidate);
+}
+async function readImage(file){
+ if(!window.Tesseract)throw Error('Không tải được Tesseract.js.');
+ const bitmap=await createImageBitmap(file),scale=Math.max(2,Math.min(3.2,2600/Math.max(bitmap.width,bitmap.height)));
+ const original=makeCanvas(bitmap,scale,false),enhanced=makeCanvas(bitmap,scale,true);
+ const qr=decodeQrCanvas(original)||decodeQrCanvas(enhanced);
+ const p1=await ocrCanvas(original,file.name+' · ảnh gốc'),a=parseText(p1.text,file.name);a.ocrConfidence=p1.ocrConfidence;a.sourceMode='OCR ảnh gốc';
+ const p2=await ocrCanvas(enhanced,file.name+' · tăng tương phản'),b=parseText(p2.text,file.name);b.ocrConfidence=p2.ocrConfidence;b.sourceMode='OCR tăng cường';
+ const r=mergeCandidates(a,b);r.qrEvidence=qr?[{page:1,text:qr,...qrExtract(qr)}]:[];
+ return reconcileQr(r);
+}
+function reconcileQr(r){
+ const entries=r.qrEvidence||[],q=entries.map(x=>x.text?x:qrExtract(x)).find(x=>x&&Object.keys(x).some(k=>['sellerTax','number','series','date','amount'].includes(k)));
+ r.qrConflicts=[];
+ if(q){for(const k of ['sellerTax','number','series','date','amount'])if(q[k]){if(r[k]&&String(r[k])!==String(q[k]))r.qrConflicts.push('QR khác '+k+': PDF/XML='+r[k]+'; QR='+q[k]);else if(!r[k])r[k]=q[k];}}
+ if(r.qrConflicts.length)r.checks=[...(r.checks||[]),...r.qrConflicts];
+ r.evidence=buildEvidence(r);return r;
+}
+async function readFile(file){
+ const ext=file.name.split('.').pop().toLowerCase();
+ if(ext==='xml')return parseXml(await file.text(),file.name);
+ if(ext==='pdf')return readPdf(file);
+ if(['jpg','jpeg','png','webp','tif','tiff'].includes(ext))return readImage(file);
+ throw Error('Định dạng chưa hỗ trợ: '+ext);
+}
+function scoreInvoice(r){
+ const keys=['sellerTax','seller','buyerTax','buyer','series','number','date','amount'];
+ const weights={sellerTax:15,seller:10,buyerTax:8,buyer:7,series:12,number:12,date:12,amount:16};
+ let score=keys.reduce((n,k)=>n+(clean(r[k])?weights[k]:0),0);
+ if(r.sourceMode==='XML')score+=10;
+ else if(r.sourceMode==='PDF text')score+=7;
+ else if(r.sourceMode==='OCR tăng cường'||r.sourceMode==='OCR ảnh gốc')score+=Math.round((r.ocrConfidence||0)*.04);
+ if(r.date){const m=r.date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);if(m){const d=new Date(+m[3],+m[2]-1,+m[1]);if(d.getDate()!==+m[1]||d.getMonth()!==+m[2]-1||d.getFullYear()!==+m[3])score-=15;}}
+ if(r.sellerTax&&!/^(\d{10}|\d{13}|\d{10}-\d{3})$/.test(r.sellerTax))score-=15;
+ score-=Math.min(35,(r.checks||[]).length*7);
+ score-=Math.min(25,(r.qrConflicts||[]).length*12);
+ return Math.max(0,Math.min(100,score));
+}
+const renderBase=render;
+function render(){
+ renderBase();
+ document.querySelectorAll('#resultsBody tr').forEach((tr)=>{
+  const idx=tr.querySelector('.cell')?.dataset.i;if(idx===undefined)return;
+  const r=state.rows[Number(idx)];if(!r)return;
+  const fileCell=tr.children[1];if(fileCell&&!fileCell.querySelector('.source-details')){
+   const details=document.createElement('details');details.className='source-details';
+   const summary=document.createElement('summary');summary.textContent=(r.sourceMode||'Nguồn chưa rõ')+' · '+(r.templateFamily||classifyInvoice(r));
+   const body=document.createElement('div');body.className='source-evidence';
+   body.innerHTML='<b>Bằng chứng nhận dạng</b><p>QR: '+(r.qrEvidence?.length?'Đã phát hiện '+r.qrEvidence.length+' mã':'Không phát hiện / thư viện chưa sẵn sàng')+'</p><p>'+esc((r.qrConflicts||[]).join(' | '))+'</p><pre>'+esc((r.raw||r.sourceText||'').slice(0,1800))+'</pre>';
+   details.append(summary,body);fileCell.append(details);
+  }
+ });
+}
+const exportBase=exportWorkbook;
+async function exportWorkbook(kind){
+ const required=kind==='transfer'?['buyerTax','buyer','series','number','date','amount']:['sellerTax','seller','series','number','date','amount'];
+ const blocking=[];
+ state.rows.forEach((r,i)=>{
+  const missing=required.filter(k=>!clean(r[k]));
+  if(missing.length)blocking.push('Hồ sơ '+(i+1)+': thiếu '+missing.join(', '));
+  if(r.duplicateOf)blocking.push('Hồ sơ '+(i+1)+': hóa đơn trùng');
+  if((r.checks||[]).some(x=>/không khớp|không tồn tại|không hợp lệ|MST đơn vị phát hành phần mềm/i.test(x)))blocking.push('Hồ sơ '+(i+1)+': có cảnh báo trọng yếu');
+ });
+ if(blocking.length){status('Chưa thể xuất để tránh sai dữ liệu: '+blocking.slice(0,4).join(' · '));alert('Cần xác minh trước khi xuất:\n\n'+blocking.slice(0,12).join('\n'));return;}
+ if(!confirm('Đã kiểm tra các trường bắt buộc và cảnh báo trọng yếu. Bạn xác nhận dữ liệu đã được đối chiếu với hóa đơn gốc để xuất Excel?'))return;
+ return exportBase(kind);
+}
+
 $('#fileInput').addEventListener('change',e=>addFiles([...e.target.files]));$('#processBtn').addEventListener('click',process);$('#clearBtn').addEventListener('click',()=>{if(confirm('Xóa toàn bộ hồ sơ của lô hiện tại?')){state.files=[];state.rows=[];$('#fileInput').value='';$('#fileList').innerHTML='';render();status('Đã xóa lô hiện tại.');}});$('#statusFilter').addEventListener('change',render);$('#deleteErrors').addEventListener('click',()=>{if(confirm('Xóa tất cả hồ sơ không nhận dạng?')){state.rows=state.rows.filter(r=>review(r)!=='Không nhận dạng');render();}});$('#transferTemplate').addEventListener('change',e=>loadTemplate('transfer',e.target.files[0]));$('#offsetTemplate').addEventListener('change',e=>loadTemplate('offset',e.target.files[0]));$('#exportTransfer').addEventListener('click',()=>exportWorkbook('transfer'));$('#exportOffset').addEventListener('click',()=>exportWorkbook('offset'));const dz=$('#dropzone');['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('dragging');}));['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('dragging');}));dz.addEventListener('drop',e=>addFiles([...e.dataTransfer.files]));render();
 })();
