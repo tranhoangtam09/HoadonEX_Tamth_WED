@@ -65,3 +65,16 @@ Parser đã được tăng cường để:
 - Dùng chữ số đầu của ký hiệu làm gợi ý “Ký hiệu mẫu số”; cần rà soát theo mẫu biểu và loại hóa đơn thực tế.
 
 **Lưu ý:** Bảng trên là dữ liệu chuẩn đối chiếu đọc từ các PDF gốc, không phải tuyên bố rằng ứng dụng đã tự động vượt qua kiểm thử toàn bộ. Cần tải các PDF lên bản GitHub Pages sau cập nhật và so sánh kết quả từng trường. Nếu trường nào sai, chỉnh sửa trực tiếp trên bảng trước khi xuất.
+
+
+## Nâng cấp độ chính xác — Accuracy pipeline
+- XML parser được đưa vào luồng đọc thực tế; chuẩn hóa tên thẻ XML theo local-name và hỗ trợ thêm các alias trường thường gặp.
+- PDF Text được ưu tiên; PDF scan hoặc PDF có trường còn thiếu sẽ được OCR tăng cường nhiều trang.
+- Quét QR trên tối đa 3 trang đầu của PDF và ảnh; dữ liệu QR chỉ được dùng để bổ sung trường còn trống, không âm thầm ghi đè dữ liệu mâu thuẫn.
+- Nếu QR và PDF khác nhau, ứng dụng hiển thị cảnh báo để người dùng xác minh.
+- Mỗi hồ sơ có phần mở rộng xem nguồn văn bản trích xuất và chế độ nhận dạng.
+- Điểm đánh giá được tính lại có xét nguồn XML/PDF/OCR và cảnh báo; đây là điểm kiểm tra nội bộ, không phải xác suất chính xác được hiệu chuẩn.
+- Xuất Excel yêu cầu các trường cốt lõi theo loại biểu mẫu, không có hóa đơn trùng hoặc cảnh báo trọng yếu; người dùng phải xác nhận đã đối chiếu bản gốc.
+- QR decode dùng thư viện jsQR qua CDN. Ứng dụng vẫn chạy nếu không tải được thư viện, nhưng sẽ không có dữ liệu QR.
+
+**Giới hạn kiểm thử:** Chưa thể xác nhận độ chính xác đầu-cuối của OCR/QR trên mọi hóa đơn chỉ bằng kiểm tra mã nguồn. Cần chạy bộ PDF/XML thực tế trên GitHub Pages và so sánh từng trường với dữ liệu chuẩn trước khi sử dụng nghiệp vụ.
