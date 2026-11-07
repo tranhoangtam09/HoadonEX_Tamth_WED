@@ -83,7 +83,7 @@ function extractInvoiceIdCluster(source){
   if(label&&label.d<=220){codeHit={value:c[1].toUpperCase(),index:at,labelDistance:label.d};break;}
  }
  if(!codeHit)return {formCode:'',series:'',number:''};
- const numberLabels=[...header.matchAll(/(?:^|[^A-Z])(?:Số|No\s*\)?)\s*[:：]/gim)];
+ const numberLabels=[...header.matchAll(/(?:^|[^A-Z])(?:Số(?:\s*\(\s*No\s*\))?|No)\s*[:：]/gim)];
  const digits=[...header.matchAll(/\b(\d{5,25})\b/g)];
  let numberHit=null;
  for(const n of digits){
