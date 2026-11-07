@@ -121,30 +121,46 @@ function parseText(t,file){
  // "Ký hiệu" ở dòng trên; giá trị ký hiệu ngay cạnh/sau nhãn.
  // "Số" ở dòng dưới; dãy số ngay cạnh/sau nhãn. Hỗ trợ PDF text, XML text và OCR.
  // Identify the invoice header cluster, not arbitrary digit strings across the whole PDF.
+ // Read the three invoice identifiers only from explicit labels in the invoice heading.
+ // Never infer invoice number from a nearby arbitrary number (e.g. address 406).
  const titleIndex=lines.findIndex(x=>/^\s*(?:HÓA ĐƠN|HOA DON)\b/i.test(x));
- const headerFrom=titleIndex>=0?Math.max(0,titleIndex-15):0;
- const headerTo=titleIndex>=0?Math.min(lines.length,titleIndex+13):Math.min(lines.length,45);
+ const headerFrom=titleIndex>=0?Math.max(0,titleIndex-8):0;
+ const headerTo=titleIndex>=0?Math.min(lines.length,titleIndex+10):Math.min(lines.length,35);
  const headerLines=lines.slice(headerFrom,headerTo);
  const headerText=headerLines.join(' ');
- const seriesLabelAt=headerLines.findIndex(x=>/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i.test(x));
- const numberLabelAt=headerLines.findIndex(x=>/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?\s*$/i.test(x)||/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?\s*[0-9]/i.test(x));
- const nearestCandidate=(labelIndex,rx)=>{
-  if(labelIndex<0)return '';
-  const found=[];
-  for(let i=Math.max(0,labelIndex-5);i<=Math.min(headerLines.length-1,labelIndex+5);i++){
-   const m=headerLines[i].match(rx);
-   if(m)found.push({v:m[1]||m[0],d:Math.abs(i-labelIndex),i});
+ const seriesLabel=/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i;
+ const numberLabel=/^\s*Số(?:\s*\(No\))?\s*[:：]?\s*(.*)$/i;
+ let fullSeries='',number='';
+ // Series: value must be explicitly attached to the "Ký hiệu" label or be the
+ // next standalone code line. A company tax code or address number is not eligible.
+ for(let i=0;i<headerLines.length;i++){
+  const m=headerLines[i].match(seriesLabel);
+  if(!m)continue;
+  const tail=headerLines[i].slice(m.index+m[0].length);
+  let v=tail.match(/[:：]?\s*([0-9][A-Z][A-Z0-9]{2,15})\b/i);
+  if(!v&&headerLines[i+1])v=headerLines[i+1].match(/^\s*([0-9][A-Z][A-Z0-9]{2,15})\s*$/i);
+  if(v){fullSeries=v[1].toUpperCase();break;}
+ }
+ // Invoice number: exact "Số:" / "Số (No):" label only; if value is on next line,
+ // accept only a standalone digit string directly below that label.
+ for(let i=0;i<headerLines.length;i++){
+  const m=headerLines[i].match(numberLabel);
+  if(!m)continue;
+  const tail=(m[1]||'').trim();
+  const same=tail.match(/^([0-9]{3,25})\s*$/);
+  if(same){number=same[1];break;}
+  if(!tail&&headerLines[i+1]){
+   const next=headerLines[i+1].match(/^\s*([0-9]{3,25})\s*$/);
+   if(next){number=next[1];break;}
   }
-  found.sort((x,y)=>x.d-y.d||x.i-y.i);
-  return found[0]?.v||'';
- };
- let fullSeries=nearestCandidate(seriesLabelAt,/\b([0-9][A-Z]{1,4}[0-9]{2}[A-Z0-9]{1,10})\b/i);
- if(!fullSeries)fullSeries=first(headerText,[/(?:Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9][A-Z0-9]{3,17})/i,/\b([0-9][A-Z]{1,4}[0-9]{2}[A-Z0-9]{1,10})\b/i]);
- let number=nearestCandidate(numberLabelAt,/\b([0-9]{3,25})\b/);
- if(number&&/^20\d{2}$/.test(number))number='';
+ }
+ // Handle PDF text layers that put both labels and values on the same visual line.
+ if(!fullSeries){
+  const m=headerText.match(/Ký hiệu(?:\s*\(Sign\))?\s*[:：]\s*([0-9][A-Z][A-Z0-9]{2,15})/i);
+  if(m)fullSeries=m[1].toUpperCase();
+ }
  if(!number){
-  const labelText=headerLines.slice(Math.max(0,numberLabelAt-2),Math.min(headerLines.length,numberLabelAt+6)).join(' ');
-  const m=labelText.match(/(?:Số(?:\s*\(No\))?)\s*[:：]?\s*([0-9]{5,25})\b/i);
+  const m=headerText.match(/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]\s*([0-9]{3,25})(?=\s|$)/i);
   if(m)number=m[1];
  }
  const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
