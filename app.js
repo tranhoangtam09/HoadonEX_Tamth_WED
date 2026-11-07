@@ -27,10 +27,10 @@ if(seller){const si=lines.findIndex(x=>/(?:Đơn vị bán hàng|Tên người b
 if(!seller){seller=lines.find(x=>/^(?:CÔNG TY|CHI NHÁNH CÔNG TY|DOANH NGHIỆP)/i.test(x))||'';if(seller&&/CHI NHÁNH/i.test(seller)){const si=lines.indexOf(seller);if(lines[si+1]&&!/(?:Mã số thuế|MST|Địa chỉ)/i.test(lines[si+1]))seller+=' '+lines[si+1];}}
 let buyer=valueAfterLabel(lines,/(?:Tên đơn vị|Tên công ty|Company'?s name)\s*[:：]?/i,2);
 if(!buyer&&buyerLabel>=0)buyer=valueAfterLabel(lines.slice(buyerLabel),/(?:Tên đơn vị|Tên công ty|Company'?s name)\s*[:：]?/i,2);
-const series=first(t,[/(?:Ký hiệu\s*(?:\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9A-Z]{1,3}[A-Z0-9]{2,15})/i]);
-const number=first(t,[/(?:Số hóa đơn|Số\s*(?:\(No\))?|Invoice\s*No\.?)\s*[:：]?\s*([0-9]{3,25})/i]);
-const rawDate=first(t,[/(?:Ngày(?:\s*\(Date\))?)\s*[:：]?\s*(\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}|\d{1,2}[/. -]\d{1,2}[/. -]\d{4})/i]);
-const total=first(t,[/(?:Tổng\s*(?:cộng\s*)?tiền\s*thanh\s*toán|III\.\s*Tổng cộng tiền thanh toán|Total amount)\s*[:：]?\s*([0-9][0-9., ]{2,})/i]);
+const series=first(t,[/(?:Ký hiệu\s*(?:\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9A-Z]{1,3}[A-Z0-9]{2,15})/i,/([0-9A-Z]{4,20})\s*(?:Ký hiệu\s*(?:\(Sign\))?|Ký hiệu hóa đơn)/i]);
+const number=first(t,[/(?:Số hóa đơn|Số\s*(?:\(No\))?|Invoice\s*No\.?)\s*[:：]?\s*([0-9]{3,25})/i,/([0-9]{3,25})\s*(?:\(No\)|Số\s*[:：])/i]);
+const rawDate=first(t,[/(?:Ngày(?:\s*\(Date\))?)\s*[:：]?\s*(\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}|\d{1,2}[/. -]\d{1,2}[/. -]\d{4})/i,/\b(\d{1,2}\s+tháng\s+\d{1,2}\s+(?:năm\s+)?\d{4})\s*Ngày?\b/i]);
+const total=first(t,[/(?:Tổng\s*(?:cộng\s*)?tiền\s*thanh\s*toán|III\.\s*Tổng cộng tiền thanh toán|Total amount)\s*[:：]?\s*([0-9][0-9., ]{2,})/i,/([0-9][0-9., ]{2,})\s*(?:Tổng\s*(?:cộng\s*)?tiền\s*thanh\s*toán|Total amount)/i]);
 const formCode=series?series.match(/^\d/)?.[0]||'':'';
 const item=extractItem(t);
 return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode,series,number,date:dateNorm(rawDate),amount:money(total),currency:'VND',item,account:'',debtAmount:'',paidDate:'',paidAmount:'',raw:t};
