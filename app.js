@@ -8,7 +8,7 @@ const clean=v=>String(v??'').replace(/\u00a0/g,' ').replace(/\s+/g,' ').trim();
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const status=s=>$('#status').textContent=s;
 function first(t,rs){for(const r of rs){const m=t.match(r);if(m&&m[1])return clean(m[1]);}return '';}
-function normalizeTax(s){const v=clean(s).replace(/[ .]/g,'');return /^\d{10}(?:-\d{3})?$/.test(v)?v:'';}
+function normalizeTax(s){const v=clean(s).replace(/[ .]/g,'');return /^(?:\d{10}|\d{12}|\d{10}-\d{3})$/.test(v)?v:'';}
 function taxFrom(block){const s=String(block||'');let m=s.match(/([0-9][0-9 .-]{8,22})\s*(?:Mã\s*số\s*thuế|MST|Tax\s*code)/i);if(!m)m=s.match(/(?:Mã\s*số\s*thuế|MST|Tax\s*code)\s*[:：]?\s*([0-9][0-9 .-]{8,22})/i);return m?normalizeTax(m[1]):'';}
 function dateNorm(s){s=clean(s);let m=s.match(/\b(\d{1,2})[/. \-](\d{1,2})[/. \-](\d{4})\b/);if(m)return m[1].padStart(2,'0')+'/'+m[2].padStart(2,'0')+'/'+m[3];m=s.match(/\b(\d{1,2})\s+tháng\s+(\d{1,2})(?:\s+năm)?\s+(\d{4})/i);if(m)return m[1].padStart(2,'0')+'/'+m[2].padStart(2,'0')+'/'+m[3];m=s.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);return m?m[3]+'/'+m[2]+'/'+m[1]:'';}
 function money(s){s=clean(s).replace(/[^\d.,-]/g,'');if(!s)return '';if(s.includes('.')&&s.includes(',')){s=s.lastIndexOf(',')>s.lastIndexOf('.')?s.replace(/\./g,'').replace(',','.'):s.replace(/,/g,'');}else if(s.includes(',')){const a=s.split(',');s=a[a.length-1].length<=2?a.slice(0,-1).join('')+'.'+a[a.length-1]:a.join('');}else if((s.match(/\./g)||[]).length>1)s=s.replace(/\./g,'');return s;}
@@ -226,7 +226,7 @@ function scoreInvoice(r){
  const weights={sellerTax:15,seller:10,buyerTax:10,buyer:8,series:12,number:12,date:12,amount:16};
  let score=required.reduce((sum,k)=>sum+(clean(r[k])?weights[k]:0),0);
  if(r.date&&/^\d{2}\/\d{2}\/\d{4}$/.test(r.date))score+=3;
- if(r.sellerTax&&/^\d{10}(?:-\d{3})?$/.test(r.sellerTax))score+=3;
+ if(r.sellerTax&&/^(?:\d{10}|\d{12}|\d{10}-\d{3})$/.test(r.sellerTax))score+=3;
  if(r.ocrConfidence!==undefined)score+=Math.round(Math.min(100,r.ocrConfidence)*.07);
  if((r.checks||[]).length)score-=Math.min(25,r.checks.length*5);
  return Math.max(0,Math.min(100,score));
