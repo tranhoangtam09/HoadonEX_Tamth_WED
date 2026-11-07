@@ -510,7 +510,7 @@ function render(){
    const details=document.createElement('details');details.className='source-details';
    const summary=document.createElement('summary');summary.textContent=(r.sourceMode||'Nguồn chưa rõ')+' · '+(r.templateFamily||classifyInvoice(r));
    const body=document.createElement('div');body.className='source-evidence';
-   body.innerHTML='<b>Bằng chứng nhận dạng</b><p>Trường nhận dạng: Mẫu số <strong>'+esc(r.formCode||'(trống)')+'</strong> · Ký hiệu <strong>'+esc(r.series||'(trống)')+'</strong> · Số HĐ <strong>'+esc(r.number||'(trống)')+'</strong></p><p>Nguồn: '+esc(r.sourceMode||'')+' · QR: '+(r.qrEvidence?.length?'Đã phát hiện '+r.qrEvidence.length+' mã':'Không phát hiện / thư viện chưa sẵn sàng')+'</p><p>'+esc((r.qrConflicts||[]).join(' | '))+'</p><pre>'+esc((r.raw||r.sourceText||'').slice(0,1800))+'</pre>';
+   body.innerHTML='<b>Bằng chứng nhận dạng</b><p>Trường nhận dạng: Mẫu số <strong>'+esc(r.formCode||'(trống)')+'</strong> · Ký hiệu <strong>'+esc(r.series||'(trống)')+'</strong> · Số HĐ <strong>'+esc(r.number||'(trống)')+'</strong></p><p>Kiểm tra cụm số: '+esc(r.identifierEvidence?.reason||'Chưa có bằng chứng cụm số')+'</p><p>Nguồn: '+esc(r.sourceMode||'')+' · QR: '+(r.qrEvidence?.length?'Đã phát hiện '+r.qrEvidence.length+' mã':'Không phát hiện / thư viện chưa sẵn sàng')+'</p><p>'+esc((r.qrConflicts||[]).join(' | '))+'</p><pre>'+esc((r.raw||r.sourceText||'').slice(0,1800))+'</pre>';
    details.append(summary,body);fileCell.append(details);
   }
  });
