@@ -13,7 +13,39 @@ function taxFrom(block){const s=String(block||'');let m=s.match(/([0-9][0-9 .-]{
 function dateNorm(s){s=clean(s);let m=s.match(/\b(\d{1,2})[/. \-](\d{1,2})[/. \-](\d{4})\b/);if(m)return m[1].padStart(2,'0')+'/'+m[2].padStart(2,'0')+'/'+m[3];m=s.match(/\b(\d{1,2})\s+tháng\s+(\d{1,2})(?:\s+năm)?\s+(\d{4})/i);if(m)return m[1].padStart(2,'0')+'/'+m[2].padStart(2,'0')+'/'+m[3];m=s.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);return m?m[3]+'/'+m[2]+'/'+m[1]:'';}
 function money(s){s=clean(s).replace(/[^\d.,-]/g,'');if(!s)return '';if(s.includes('.')&&s.includes(',')){s=s.lastIndexOf(',')>s.lastIndexOf('.')?s.replace(/\./g,'').replace(',','.'):s.replace(/,/g,'');}else if(s.includes(',')){const a=s.split(',');s=a[a.length-1].length<=2?a.slice(0,-1).join('')+'.'+a[a.length-1]:a.join('');}else if((s.match(/\./g)||[]).length>1)s=s.replace(/\./g,'');return s;}
 function valueAfterLabel(lines,labelRx,max=3){const i=lines.findIndex(x=>labelRx.test(x));if(i<0)return '';let v=lines[i].replace(labelRx,'').replace(/^[:：\s]+/,'').trim();if(v)return v;for(let j=i+1;j<Math.min(lines.length,i+1+max);j++){const q=lines[j].trim();if(!q||/^(?:Mã số thuế|MST|Địa chỉ|Hình thức thanh toán|Ký hiệu|Số\s*:)/i.test(q))continue;return q;}return '';}
-function extractItem(t){const lines=t.split(/\n/).map(x=>clean(x)).filter(Boolean);const h=lines.findIndex(x=>/Tên hàng hóa|TÊN HÀNG HÓA|Name of goods/i.test(x));if(h<0)return '';const end=lines.findIndex((x,i)=>i>h&&/(?:Cộng tiền hàng|Tổng tiền thanh toán|Tổng cộng tiền thanh toán|Thuế suất GTGT)/i.test(x));const area=lines.slice(h+1,end<0?Math.min(lines.length,h+18):end);const out=[];for(const line of area){if(/^(?:A\s+B|STT|Đơn vị tính|ĐVT|B\s+C|No\s+Name)/i.test(line))continue;if(/^\d{1,3}\s+/.test(line)){let v=line.replace(/^\d{1,3}\s+/,'');v=v.replace(/\s+(?:kg|Kg|KG|LON|Lon|Chai|chai|Lít|Lit|lon)\s+[\d.,]+\s+[\d.,]+\s+[\d.,]+.*$/,'');v=v.replace(/\s+[\d.,]{4,}\s+[\d.,]{4,}\s+[\d.,]{4,}$/,'');if(v)out.push(v);}else if(out.length&&!/^(?:Thuế|KCT|KKKNT|Tổng|Cộng|Người mua|Người bán|\(?Đơn đặt hàng)/i.test(line)&&! /^(?:kg|KG|Kg|LON|Lon|Chai|chai|Lít|Lit|lon|[\d.,]+)$/i.test(line)&&!/[0-9]{4,}/.test(line)&&out[out.length-1].length<250)out[out.length-1]+=' '+line;}return clean(out.join('; ')).slice(0,500);}
+function extractItem(t){
+ const lines=String(t||'').replace(/\u00a0/g,' ').split(/\n/).map(x=>clean(x)).filter(Boolean);
+ // Với hóa đơn nhiều dòng, lấy vùng bảng bắt đầu từ tiêu đề có cụm "Hàng hóa".
+ const headerRx=/(?:STT\s*)?(?:Tên\s*)?Hàng\s*hóa(?:\s*,?\s*(?:dịch\s*vụ|services?))?|Description\s*of\s*goods|Name\s*of\s*goods/i;
+ let h=lines.findIndex(x=>headerRx.test(x));
+ if(h<0)h=lines.findIndex(x=>/Tên hàng hóa|Name of goods/i.test(x));
+ if(h<0)return '';
+ const endRx=/(?:Cộng tiền hàng|Tổng tiền thanh toán|Tổng cộng tiền thanh toán|Thuế suất GTGT|Tổng cộng|Total amount|Amount due)/i;
+ let end=lines.findIndex((x,i)=>i>h&&endRx.test(x));
+ if(end<0)end=Math.min(lines.length,h+80);
+ const area=lines.slice(h+1,end),out=[];
+ const stopRx=/^(?:STT|Đơn vị tính|ĐVT|Số lượng|Đơn giá|Thành tiền|Thuế|KCT|KKKNT|Cộng|Tổng|Người mua|Người bán|Mã số thuế|Địa chỉ|\(?Đơn đặt hàng)/i;
+ const numberOnly=/^[\d.,%/-]+$/;
+ for(let i=0;i<area.length;i++){
+  let line=area[i];
+  if(stopRx.test(line)||numberOnly.test(line)||/^(?:A\s+B|B\s+C|No\s+Name)/i.test(line))continue;
+  // Nhận dạng dòng mặt hàng có STT: "1 Tên hàng ..."; bỏ các cột số lượng/đơn giá ở cuối.
+  const numbered=line.match(/^(\d{1,3})\s+(.+)$/);
+  if(numbered){
+   let name=numbered[2].replace(/\s+(?:kg|Kg|KG|LON|Lon|Chai|chai|Lít|Lit|lon|Cái|cái)\s+[\d.,]+(?:\s+[\d.,]+){1,4}.*$/,'');
+   name=name.replace(/\s+[\d.,]{4,}(?:\s+[\d.,]{3,}){1,4}$/,'').trim();
+   if(name&&!stopRx.test(name))out.push(name);
+   continue;
+  }
+  // Một số PDF tách tên hàng thành nhiều dòng, nối tiếp dòng mô tả trước đó.
+  if(out.length&&!/[\d]{4,}/.test(line)&&line.length<220&&!/^(?:\*|\(|\[)/.test(line)){
+   out[out.length-1]+=' '+line;
+  }else if(!out.length&&line.length>2&&!stopRx.test(line)){
+   out.push(line);
+  }
+ }
+ return clean(out.join('; ')).slice(0,1500);
+}
 function parseTextLegacy(t,file){t=String(t||'').replace(/\r/g,'\n').replace(/\u00a0/g,' ');const lines=t.split('\n').map(x=>x.replace(/[ \t]+/g,' ').trim()).filter(Boolean);
 const sellerLabel=lines.findIndex(x=>/(?:Đơn vị bán hàng|Tên người bán|Seller name)/i.test(x));
 const buyerLabel=lines.findIndex(x=>/(?:Họ tên người mua hàng|Thông tin người mua|Buyer)/i.test(x));
