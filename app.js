@@ -123,45 +123,43 @@ function parseText(t,file){
  // Identify the invoice header cluster, not arbitrary digit strings across the whole PDF.
  // Read the three invoice identifiers only from explicit labels in the invoice heading.
  // Never infer invoice number from a nearby arbitrary number (e.g. address 406).
- const titleIndex=lines.findIndex(x=>/^\s*(?:HÓA ĐƠN|HOA DON)\b/i.test(x));
- const headerFrom=titleIndex>=0?Math.max(0,titleIndex-8):0;
- const headerTo=titleIndex>=0?Math.min(lines.length,titleIndex+10):Math.min(lines.length,35);
- const headerLines=lines.slice(headerFrom,headerTo);
- const headerText=headerLines.join(' ');
+ // Robust header-cluster parser: use explicit labels as anchors.
+ // PDF text extraction may reorder visual rows, so allow the value within a small
+ // neighborhood around each label, but never search arbitrary numbers globally.
+ const headerLines=lines.slice(0,Math.min(lines.length,60));
  const seriesLabel=/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i;
- const numberLabel=/^\s*Số(?:\s*\(No\))?\s*[:：]?\s*(.*)$/i;
+ const numberLabel=/Số(?:\s*\(No\))?/i;
  let fullSeries='',number='';
- // Series: read the contiguous code immediately after "Ký hiệu" / "Ký hiệu (Sign)".
- // Its first character is the form code; all remaining characters are the invoice series.
- for(let i=0;i<headerLines.length;i++){
-  const m=headerLines[i].match(seriesLabel);
+ const seriesRx=/\b([0-9][A-Z][A-Z0-9]{2,17})\b/i;
+ const digitsRx=/\b([0-9]{5,25})\b/;
+ for(let i=0;i<headerLines.length&&!fullSeries;i++){
+  const m=seriesLabel.exec(headerLines[i]);
+  if(!m)continue;
+  // First prefer the contiguous code after the label on the same line.
+  const tail=headerLines[i].slice(m.index+m[0].length);
+  let v=tail.match(/^[\s:：-]*([0-9][A-Z][A-Z0-9]{2,17})\b/i);
+  // If PDF.js separated the label and its value into different text rows,
+  // search only the next few header rows for a series-shaped alphanumeric code.
+  if(!v){
+   for(let j=i+1;j<Math.min(headerLines.length,i+7);j++){
+    v=headerLines[j].match(/^\s*([0-9][A-Z][A-Z0-9]{2,17})\s*$/i);
+    if(v)break;
+   }
+  }
+  if(v)fullSeries=v[1].toUpperCase();
+ }
+ for(let i=0;i<headerLines.length&&!number;i++){
+  const m=numberLabel.exec(headerLines[i]);
   if(!m)continue;
   const tail=headerLines[i].slice(m.index+m[0].length);
-  let v=tail.match(/[:：]?\s*([0-9][A-Z0-9]{3,17})\b/i);
-  if(!v&&headerLines[i+1])v=headerLines[i+1].match(/^\s*([0-9][A-Z0-9]{3,17})\s*$/i);
-  if(v){fullSeries=v[1].toUpperCase();break;}
- }
- // Invoice number: exact "Số:" / "Số (No):" label only; if value is on next line,
- // accept only a standalone digit string directly below that label.
- for(let i=0;i<headerLines.length;i++){
-  const m=headerLines[i].match(numberLabel);
-  if(!m)continue;
-  const tail=(m[1]||'').trim();
-  const same=tail.match(/^([0-9]{3,25})\s*$/);
-  if(same){number=same[1];break;}
-  if(!tail&&headerLines[i+1]){
-   const next=headerLines[i+1].match(/^\s*([0-9]{3,25})\s*$/);
-   if(next){number=next[1];break;}
+  let v=tail.match(/^[\s:：-]*([0-9]{5,25})\s*$/);
+  if(!v){
+   for(let j=i+1;j<Math.min(headerLines.length,i+7);j++){
+    const candidate=headerLines[j].match(/^\s*([0-9]{5,25})\s*$/);
+    if(candidate){v=candidate;break;}
+   }
   }
- }
- // Handle PDF text layers that put both labels and values on the same visual line.
- if(!fullSeries){
-  const m=headerText.match(/Ký hiệu(?:\s*\(Sign\))?\s*[:：]\s*([0-9][A-Z0-9]{3,17})/i);
-  if(m)fullSeries=m[1].toUpperCase();
- }
- if(!number){
-  const m=headerText.match(/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]\s*([0-9]{3,25})(?=\s|$)/i);
-  if(m)number=m[1];
+  if(v)number=v[1];
  }
  const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
  const series=fullSeries&&formCode?fullSeries.slice(1):fullSeries;
