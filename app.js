@@ -128,36 +128,24 @@ function parseText(t,file){
  // or split them into adjacent rows / text items.
  const headerLines=lines.slice(0,Math.min(lines.length,80));
  const seriesLabel=/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i;
- let fullSeries='',number='';
- const seriesValue=/\b([0-9][A-Z][A-Z0-9]{2,17})\b/i;
- const numberValue=/\b([0-9]{5,25})\b/;
+ let fullSeries='',number='',seriesLine=-1;
  for(let i=0;i<headerLines.length&&!fullSeries;i++){
-  const m=seriesLabel.exec(headerLines[i]);
-  if(!m)continue;
+  const m=seriesLabel.exec(headerLines[i]);if(!m)continue;
   const tail=headerLines[i].slice(m.index+m[0].length);
   let v=tail.match(/[:：\s-]*([0-9][A-Z][A-Z0-9]{2,17})\b/i);
-  if(!v){
-   for(let j=i+1;j<Math.min(headerLines.length,i+9);j++){
-    const candidate=headerLines[j].match(/^\s*([0-9][A-Z][A-Z0-9]{2,17})\s*$/i);
-    if(candidate){v=candidate;break;}
-   }
-  }
-  if(v)fullSeries=v[1].toUpperCase();
+  if(!v)for(let j=i+1;j<Math.min(headerLines.length,i+5);j++){const q=headerLines[j].match(/^\s*([0-9][A-Z][A-Z0-9]{2,17})\s*$/i);if(q){v=q;break;}}
+  if(v){fullSeries=v[1].toUpperCase();seriesLine=i;}
  }
- for(let i=0;i<headerLines.length&&!number;i++){
-  const line=headerLines[i];
-  const re=/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?/ig;
-  let m;
-  while((m=re.exec(line))!==null){
-   const tail=line.slice(m.index+m[0].length);
-   let v=tail.match(/^[\s:：-]*([0-9]{5,25})\b/);
-   if(!v){
-    for(let j=i+1;j<Math.min(headerLines.length,i+9);j++){
-     const candidate=headerLines[j].match(/^\s*([0-9]{5,25})\s*$/);
-     if(candidate){v=candidate;break;}
-    }
+ // Require the explicit colon in Số: / Số (No): and keep it close to Ký hiệu.
+ // Address patterns like "Số 406" and "Số 472" are intentionally rejected.
+ if(seriesLine>=0){
+  for(let i=Math.max(0,seriesLine-2);i<Math.min(headerLines.length,seriesLine+5)&&!number;i++){
+   const line=headerLines[i],re=/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]\s*/ig;let m;
+   while((m=re.exec(line))!==null){
+    const tail=line.slice(m.index+m[0].length);let v=tail.match(/^([0-9]{5,25})\b/);
+    if(!v)for(let j=i+1;j<Math.min(headerLines.length,seriesLine+6);j++){const q=headerLines[j].match(/^\s*([0-9]{5,25})\s*$/);if(q){v=q;break;}}
+    if(v){number=v[1];break;}
    }
-   if(v){number=v[1];break;}
   }
  }
  const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
