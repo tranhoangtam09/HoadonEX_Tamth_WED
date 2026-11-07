@@ -38,59 +38,75 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 
 // Multi-stage recognition: template-aware extraction + OCR fallback + confidence checks.
 function parseText(t,file){
- const r=parseTextLegacy(t,file), raw=String(t||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
+ const raw=String(t||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
  const lines=raw.split('\n').map(x=>x.replace(/[ \t]+/g,' ').trim()).filter(Boolean);
- const normalizeTaxValue=v=>{const z=String(v||'').replace(/[ .]/g,'').trim();return /^(\d{10}|\d{12}|\d{10}-\d{3})$/.test(z)?z:'';};
- const taxAt=(start,end)=>{
-  const part=lines.slice(Math.max(0,start),Math.max(start,end)).join('\n');
-  const patterns=[/(?:Mã\s*số\s*thuế|MST|Tax\s*code)\s*[:：]?\s*([0-9][0-9 .-]{8,24})/i,/([0-9][0-9 .-]{8,24})\s*(?:Mã\s*số\s*thuế|MST|Tax\s*code)/i];
-  for(const p of patterns){const m=part.match(p);if(m){const v=normalizeTaxValue(m[1]);if(v)return v;}}
+ const cleanLine=x=>String(x||'').replace(/\s+/g,' ').trim();
+ const taxNorm=x=>{const z=String(x||'').replace(/[ .]/g,'').trim();return /^(?:\d{10}|\d{12}|\d{10}-\d{3})$/.test(z)?z:'';};
+ const taxAtLabel=(start,end)=>{
+  for(let i=Math.max(0,start);i<Math.min(lines.length,end);i++){
+   if(!/(?:Mã\s*số\s*thuế|MST|Tax\s*code)/i.test(lines[i]))continue;
+   const candidates=[lines[i].replace(/.*?(?:Mã\s*số\s*thuế|MST|Tax\s*code)\s*[:：]?/i,''),lines[i+1]||'',lines[i-1]||''];
+   for(const c of candidates){const m=c.match(/\b\d[\d .-]{8,22}\b/);if(m){const v=taxNorm(m[0]);if(v&&v!=='0101243150'&&v!=='0100109106')return v;}}
+  }
   return '';
  };
- const sellIdx=lines.findIndex(x=>/Đơn vị bán hàng|Tên người bán|Seller name/i.test(x));
- const buyIdx=lines.findIndex(x=>/Họ tên người mua hàng|Tên khách hàng|Tên đơn vị mua hàng|Company'?s name|Buyer/i.test(x));
- const buyerStart=buyIdx>=0?buyIdx:lines.findIndex(x=>/^Tên đơn vị\s*[:：]/i.test(x));
- let st=sellIdx>=0?taxAt(sellIdx,buyerStart>sellIdx?buyerStart:Math.min(lines.length,sellIdx+24)):'';
- if(!st){const topEnd=buyerStart>0?buyerStart:Math.min(lines.length,24);st=taxAt(0,topEnd);if(st==='0101243150'||st==='0100109106')st='';}
- let bt=buyerStart>=0?taxAt(buyerStart,lines.length):'';
- if(st)r.sellerTax=st;
- if(bt)r.buyerTax=bt;
-
- const seriesMatch=raw.match(/(?:Ký hiệu(?:\s*\(Serial\)|\s*\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9A-Z]{4,18})/i);
- if(seriesMatch)r.series=seriesMatch[1].trim();
- const noMatch=raw.match(/(?:Số hóa đơn|Số\s*(?:\(No\.?\))?|Invoice\s*No\.?)\s*[:：]?\s*([0-9]{1,25})/i);
- if(noMatch)r.number=noMatch[1];
- const dateMatch=raw.match(/(?:Ngày(?:\s*\(date\))?)\s*[:：]?\s*(\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}|\d{1,2}[/. -]\d{1,2}[/. -]\d{4})/i);
- if(dateMatch)r.date=dateNorm(dateMatch[1]);
-
- const totalPatterns=[
-  /(?:Tổng\s*(?:cộng\s*)?tiền\s*thanh\s*toán|III\.\s*Tổng cộng tiền thanh toán|Total\s*payment|Total\s*amount)\s*[:：]?\s*([0-9][0-9., ]{2,})/i,
-  /(?:Cộng\s*tiền\s*hàng\s*hóa,\s*dịch\s*vụ|Cộng\s*tiền\s*hàng|Total\s*amount)\s*[:：]?\s*([0-9][0-9., ]{2,})/i
- ];
- let totalMatch=null;
- for(const p of totalPatterns){totalMatch=raw.match(p);if(totalMatch)break;}
- if(totalMatch)r.amount=money(totalMatch[1]);
-
- const buyerNameLine=lines.findIndex(x=>/^(?:Tên khách hàng|Tên đơn vị|Tên công ty|Company'?s name)\s*[:：]/i.test(x));
- if(buyerNameLine>=0){
-  const v=lines[buyerNameLine].replace(/^(?:Tên khách hàng|Tên đơn vị|Tên công ty|Company'?s name)\s*[:：]\s*/i,'').trim();
-  if(v&&!/^(?:Mã số thuế|MST|Địa chỉ)/i.test(v))r.buyer=v;
+ const sellerIdx=lines.findIndex(x=>/(?:Đơn vị bán hàng|Tên người bán|Seller name)\s*[:：]?/i.test(x));
+ const buyerNameIdx=lines.findIndex(x=>/^(?:Tên khách hàng|Tên đơn vị|Tên công ty|Company'?s name)\s*[:：]?/i.test(x));
+ const buyerPersonIdx=lines.findIndex(x=>/Họ tên người mua hàng/i.test(x));
+ const buyerStart=buyerNameIdx>=0?buyerNameIdx:(buyerPersonIdx>=0?buyerPersonIdx:-1);
+ let sellerTax='',seller='';
+ if(sellerIdx>=0){
+  const sellerEnd=buyerStart>sellerIdx?buyerStart:Math.min(lines.length,sellerIdx+25);
+  sellerTax=taxAtLabel(sellerIdx,sellerEnd);
+  let name=lines[sellerIdx].replace(/.*?(?:Đơn vị bán hàng|Tên người bán|Seller name)\s*[:：]?/i,'').trim();
+  const parts=name?[name]:[];
+  for(let j=sellerIdx+1;j<sellerEnd&&j<sellerIdx+5;j++){
+   const q=lines[j];if(/(?:Mã\s*số\s*thuế|MST|Tax\s*code|Địa chỉ|Address|Số tài khoản)/i.test(q))break;
+   if(q&&!/^\d/.test(q)&&!/^HÓA ĐƠN/i.test(q))parts.push(q);
+  }
+  seller=cleanLine(parts.join(' '));
+ }else{
+  // Vendor templates without a "Đơn vị bán hàng" label: use the first issuer identity block.
+  const firstTaxLine=lines.findIndex(x=>/(?:Mã\s*số\s*thuế|MST|Tax\s*code)/i.test(x));
+  if(firstTaxLine>=0){
+   sellerTax=taxAtLabel(0,Math.min(lines.length,firstTaxLine+4));
+   for(let j=firstTaxLine-1;j>=Math.max(0,firstTaxLine-5);j--){
+    if(/^(?:CÔNG TY|DOANH NGHIỆP|HỘ KINH DOANH|NGUYỄN THỊ|ĐẶNG VĂN)/i.test(lines[j])){seller=lines[j];break;}
+   }
+  }
  }
- if(!r.buyer&&buyerStart>=0){
-  const b=lines.slice(buyerStart).find(x=>/^(?:CÔNG TY|DOANH NGHIỆP|HỘ KINH DOANH|NGÂN HÀNG)/i.test(x));
-  if(b)r.buyer=b;
+ let buyer='',buyerTax='';
+ if(buyerNameIdx>=0){
+  const label=lines[buyerNameIdx];
+  buyer=label.replace(/^(?:Tên khách hàng|Tên đơn vị|Tên công ty|Company'?s name)\s*[:：]?\s*/i,'').trim();
+  if(!buyer){for(let j=buyerNameIdx+1;j<Math.min(lines.length,buyerNameIdx+4);j++){if(/(?:Mã\s*số\s*thuế|MST|Địa chỉ|Address)/i.test(lines[j]))break;if(lines[j]){buyer=lines[j];break;}}}
+  const buyerEnd=Math.min(lines.length,buyerNameIdx+12);
+  buyerTax=taxAtLabel(buyerNameIdx,buyerEnd);
+ }else if(buyerPersonIdx>=0){
+  buyerTax=taxAtLabel(buyerPersonIdx,Math.min(lines.length,buyerPersonIdx+15));
  }
- if(!r.seller){
-  const si=lines.findIndex(x=>/^(?:CÔNG TY|CHI NHÁNH CÔNG TY|DOANH NGHIỆP|NGUYỄN THỊ|ĐẶNG VĂN)/i.test(x));
-  if(si>=0)r.seller=lines[si];
+ const series=first(raw,[/(?:Ký hiệu\s*(?:\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9A-Z]{4,18})/i]);
+ let number='';
+ const headerPos=series?raw.toUpperCase().indexOf(series.toUpperCase()):-1;
+ if(headerPos>=0){const around=raw.slice(headerPos,headerPos+220);const m=around.match(/(?:Số\s*(?:\(No\))?|Số hóa đơn|Invoice\s*No\.?)\s*[:：]?\s*([0-9]{1,25})/i);if(m)number=m[1];}
+ if(!number)number=first(raw,[/(?:Số hóa đơn|Số\s*(?:\(No\))?|Invoice\s*No\.?)\s*[:：]?\s*([0-9]{3,25})/i]);
+ const dateRaw=first(raw,[/(?:Ngày(?:\s*\(Date\))?)\s*[:：]?\s*(\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}|\d{1,2}[/. -]\d{1,2}[/. -]\d{4})/i]);
+ let amount='';
+ const totalLabel=/(?:Tổng\s*(?:cộng\s*)?tiền\s*thanh\s*toán|Total\s*(?:payment|amount))/i;
+ for(let i=0;i<lines.length;i++)if(totalLabel.test(lines[i])){
+  const candidates=[lines[i].replace(totalLabel,''),lines[i+1]||'',lines[i+2]||''];
+  for(const c of candidates){const m=c.match(/\b\d[\d., ]{2,}\b/);if(m){const v=money(m[0]);if(v&&Number(v)>0){amount=v;break;}}}
+  if(amount)break;
  }
- r.sellerTax=normalizeTaxValue(r.sellerTax)||r.sellerTax;
- r.buyerTax=normalizeTaxValue(r.buyerTax)||r.buyerTax;
- r.formCode=r.series?(r.series.match(/^\d/)||[''])[0]:'';
- r.sourceText=raw;
- r.checks=validateInvoice(r);
- r.confidence=confidenceScore(r);
- return r;
+ // Only sales invoices may use the labeled gross sales amount as a fallback.
+ if(!amount&&/HÓA ĐƠN BÁN HÀNG/i.test(raw)){
+  for(let i=0;i<lines.length;i++)if(/Cộng tiền hàng hóa, dịch vụ/i.test(lines[i])){
+   const m=(lines[i]+' '+(lines[i+1]||'')).match(/\b\d[\d., ]{2,}\b/);if(m)amount=money(m[0]);
+  }
+ }
+ const item=extractItem(raw);
+ const r={file,sellerTax,seller:cleanLine(seller),buyerTax,buyer:cleanLine(buyer),formCode:series?(series.match(/^\d/)||[''])[0]:'',series,number,date:dateNorm(dateRaw),amount,currency:'VND',item,account:'',debtAmount:'',paidDate:'',paidAmount:'',raw,sourceText:raw};
+ r.checks=validateInvoice(r);r.confidence=confidenceScore(r);return r;
 }
 function validateInvoice(r){
  const warnings=[];
@@ -130,13 +146,14 @@ async function ocrCanvas(canvas,label){
 }
 function mergeCandidates(a,b){
  if(!a)return b;if(!b)return a;
- const qa=confidenceScore(a),qb=confidenceScore(b),out={...a};
+ const out={...a};
+ // PDF text is the primary evidence. OCR may fill blanks only; never replace a populated
+ // field merely because OCR produced a higher completeness score.
  for(const k of ['sellerTax','seller','buyerTax','buyer','formCode','series','number','date','amount','currency','item']){
-   if((!out[k]||String(out[k]).length<2)&&b[k])out[k]=b[k];
+  if((out[k]===undefined||out[k]===null||String(out[k]).trim()==='')&&b[k])out[k]=b[k];
  }
- if(qb>qa){for(const k of ['sellerTax','seller','buyerTax','buyer','series','number','date','amount','item'])if(b[k])out[k]=b[k];}
  out.ocrConfidence=b.ocrConfidence||a.ocrConfidence||0;
- out.sourceMode=qa>=qb?'PDF text + validation':'OCR enhanced';
+ out.sourceMode='PDF text ưu tiên; OCR chỉ bổ sung trường trống';
  out.checks=validateInvoice(out);out.confidence=confidenceScore(out);return out;
 }
 async function readPdf(file){
