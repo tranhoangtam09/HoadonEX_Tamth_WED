@@ -1,30 +1,43 @@
-# HOA DON EX — TAMTH WEB
+# HOA DON EX PRO — TAMTH WEB
 
-Ứng dụng web độc lập chạy tĩnh trên trình duyệt, triển khai được bằng GitHub Pages.
+Ứng dụng độc lập chạy trên trình duyệt và có thể triển khai bằng GitHub Pages. Không cần FastAPI, Python, SQLite hoặc máy chủ riêng.
 
-## Tính năng trong bản khởi tạo
-- Nhận PDF, XML, JPG, JPEG và PNG.
-- Ưu tiên đọc lớp văn bản PDF; nếu PDF scan thì chuyển sang OCR bằng Tesseract.js.
-- Đọc nội dung XML; OCR hình ảnh tiếng Việt/Anh.
-- Trích xuất bước đầu: mã số thuế người bán, tên đơn vị phát hành, mẫu số, ký hiệu, số hóa đơn, ngày hóa đơn và tổng tiền.
-- Cho phép rà soát, hiệu chỉnh trực tiếp trên bảng.
-- Xuất bảng dữ liệu Excel cho hai loại bảng kê.
-- Không cần FastAPI, Python, SQLite hoặc máy chủ riêng. Dữ liệu xử lý trong phiên trình duyệt.
+## Đã triển khai
+- Nhận nhiều hóa đơn PDF, XML, JPG, JPEG, PNG, WEBP và TIFF.
+- Ưu tiên đọc lớp văn bản PDF; PDF scan chuyển sang OCR Tesseract.js tiếng Việt/Anh.
+- Đọc XML và ánh xạ một số trường hóa đơn điện tử phổ biến (MST, người bán/người mua, ký hiệu, số hóa đơn, ngày, tổng tiền); XML khác chuẩn cần bổ sung bộ ánh xạ.
+- Trích xuất gợi ý: MST và tên người bán/người mua, mẫu số, ký hiệu, số hóa đơn, ngày, tổng tiền, loại tiền, mô tả hàng hóa.
+- Bảng dữ liệu có thể chỉnh sửa, lọc trạng thái, xóa từng hồ sơ, xóa hồ sơ không nhận dạng và xóa lô.
+- Lô mới chỉ thay thế lô cũ nếu có ít nhất một tệp đọc thành công; nếu cả lô lỗi, dữ liệu cũ được giữ lại.
+- Nạp trực tiếp workbook Excel mẫu gốc do người dùng chọn và xuất theo đúng sheet bảng kê, giữ sheet hướng dẫn và kiểu định dạng của workbook.
+- Dữ liệu thiếu vẫn được phép xuất; ô tương ứng để trống, không tự tạo hoặc suy đoán.
 
-## Chạy bằng GitHub Pages
-1. Vào **Settings → Pages**.
-2. Chọn **Deploy from a branch**.
-3. Branch: `main`; Folder: `/ (root)`; nhấn **Save**.
-4. Sau khi GitHub Pages triển khai, mở URL Pages được hiển thị trong Settings → Pages.
+## Bắt đầu sử dụng
+1. Mở ứng dụng sau khi GitHub Pages đã được bật.
+2. Tải hóa đơn lên và nhấn **Phân tích lô hóa đơn**.
+3. Kiểm tra và hiệu chỉnh từng trường trong bảng.
+4. Tải lên file mẫu gốc ở mục **Quản lý biểu mẫu Excel gốc**:
+   - Chuyển khoản: sheet `Bảng kê hóa đơn`, 12 cột.
+   - Bù đắp: sheet `Bảng kê hóa đơn GN bù đắp`, 13 cột.
+5. Nhấn nút xuất tương ứng.
 
-## Lưu ý về độ chính xác
-Bộ trích xuất hiện là nền tảng khởi tạo với quy tắc nhận dạng tổng quát, chưa thể cam kết độ chính xác 100% cho mọi mẫu hóa đơn. Mẫu hóa đơn khác nhau có cách bố trí/nhãn trường khác nhau; OCR phụ thuộc chất lượng ảnh. Người dùng phải rà soát các ô cảnh báo trước khi xuất. Không tự suy luận thông tin bị thiếu.
+## Quy tắc ánh xạ dữ liệu Excel
+**Chuyển khoản VND:** STT; MST người mua/thụ hưởng; tên người mua/thụ hưởng; số tài khoản; ký hiệu mẫu; ký hiệu hóa đơn; số hóa đơn; ngày hóa đơn; số tiền hóa đơn; loại tiền; mặt hàng/mục đích; số tiền nhận nợ.
 
-## Việc cần hoàn thiện tiếp theo
-- Tích hợp hai file Excel mẫu nghiệp vụ thực tế để xuất đúng vị trí ô, công thức, định dạng và cấu trúc hiện hành.
-- Bổ sung bộ phân tích XML hóa đơn điện tử theo các chuẩn/nhà cung cấp phổ biến, ánh xạ theo thẻ dữ liệu thay vì chỉ tìm từ khóa.
-- Mở rộng nhận dạng nhiều bố cục PDF, bảng tiền, thuế suất, tổng thanh toán; có điểm tin cậy và vùng trích dẫn.
-- Thêm lưu lịch sử trên IndexedDB, gộp PDF, tải ZIP và kiểm thử bằng bộ hóa đơn thật đã được đối chiếu thủ công.
+**Bù đắp VND:** STT; MST người bán; tên đơn vị phát hành; ký hiệu mẫu; ký hiệu hóa đơn; số hóa đơn; ngày hóa đơn; số tiền hóa đơn; loại tiền; mặt hàng/mục đích; số tiền nhận nợ; ngày thanh toán; số tiền đã thanh toán.
 
-## Thư viện bên thứ ba
-PDF.js, Tesseract.js và ExcelJS được tải từ CDN khi có kết nối Internet. Không tải hóa đơn lên dịch vụ bên ngoài qua mã ứng dụng này.
+Thông tin số tài khoản, số tiền nhận nợ và dữ liệu thanh toán là dữ liệu nghiệp vụ cần người dùng nhập/duyệt; ứng dụng không suy ra từ hóa đơn.
+
+## GitHub Pages
+Vào **Settings → Pages**, chọn **Deploy from a branch**, branch `main`, folder `/ (root)`, rồi Save. Workflow trong `.github/workflows/pages.yml` cũng được cấu hình để triển khai Pages khi push lên `main`.
+
+## Giới hạn và kiểm soát
+- Không thể cam kết OCR chính xác 100%. Chất lượng ảnh, font, bố cục và chuẩn XML khác nhau; phải đối chiếu hóa đơn gốc.
+- Bộ XML hiện là ánh xạ nền tảng, không phải bộ giải mã đã chứng nhận cho mọi nhà cung cấp hóa đơn điện tử.
+- ExcelJS đọc/ghi workbook trong trình duyệt; cần kiểm tra các tính năng Excel đặc biệt sau xuất (ví dụ macro, đối tượng nhúng, một số tính năng riêng của nhà cung cấp).
+- File mẫu được chọn trong phiên trình duyệt; tải lại trang cần chọn lại mẫu.
+- PDF.js, Tesseract.js và ExcelJS tải từ CDN, cần kết nối Internet. Hóa đơn được xử lý trong trình duyệt, mã ứng dụng không tự gửi tệp lên máy chủ.
+- Chưa triển khai gộp PDF, ZIP, lưu lịch sử đa thiết bị hoặc đồng bộ dữ liệu nhiều người dùng.
+
+## Công nghệ
+HTML, CSS, JavaScript, PDF.js, Tesseract.js, ExcelJS, GitHub Pages.
