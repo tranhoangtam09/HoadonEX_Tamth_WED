@@ -85,7 +85,10 @@ function parseText(t,file){
  }else if(buyerPersonIdx>=0){
   buyerTax=taxAtLabel(buyerPersonIdx,Math.min(lines.length,buyerPersonIdx+15));
  }
- const series=first(raw,[/(?:Ký hiệu\s*(?:\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9A-Z]{4,18})/i]);
+ const fullSeries=first(raw,[/(?:Ký hiệu\s*(?:\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9A-Z]{4,18})/i]);
+ // Theo mẫu Excel: mẫu số là ký tự đầu tiên (ví dụ 1); ký hiệu hóa đơn là phần còn lại (K26TKD).
+ const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
+ const series=fullSeries&&formCode?fullSeries.slice(1):fullSeries;
  // Invoice number is the digit sequence printed BELOW the invoice series.
  // Only inspect text AFTER the series label/value; never search the address/header before it.
  // This prevents house number (e.g. 472 Nguyễn Huệ), phone, account and PO numbers
@@ -133,7 +136,7 @@ function parseText(t,file){
   }
  }
  const item=extractItem(raw);
- const r={file,sellerTax,seller:cleanLine(seller),buyerTax,buyer:cleanLine(buyer),formCode:series?(series.match(/^\d/)||[''])[0]:'',series,number,orderNumber,date:dateNorm(dateRaw),amount,currency:'VND',item,account:'',debtAmount:'',paidDate:'',paidAmount:'',raw,sourceText:raw};
+ const r={file,sellerTax,seller:cleanLine(seller),buyerTax,buyer:cleanLine(buyer),formCode,series,number,orderNumber,date:dateNorm(dateRaw),amount,currency:'VND',item,account:'',debtAmount:'',paidDate:'',paidAmount:'',raw,sourceText:raw};
  r.checks=validateInvoice(r);r.confidence=confidenceScore(r);return r;
 }
 function validateInvoice(r){
@@ -307,11 +310,13 @@ function parseXml(xml,file){
  const buyerSec=findSection(['nmua','buyer','thongtinnguoimua','buyerinfo']);
  const sellerTax=xmlField(root,['mstnb','mstnguoiban','taxcode','taxid'],sellerSec)||xmlField(root,['mstnb','mstnguoiban']);
  const buyerTax=xmlField(root,['mstnmua','mstnguoimua'],buyerSec)||xmlField(root,['mstnmua','mstnguoimua']);
- const series=xmlField(root,['khhdon','kyhieu','invoiceSeries','series']);
+ const fullSeries=xmlField(root,['khhdon','kyhieu','invoiceSeries','series']);
+ const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
+ const series=fullSeries&&formCode?fullSeries.slice(1):fullSeries;
  const number=xmlField(root,['shdon','sohoadon','invoiceNumber','invoiceno']);
  const date=xmlField(root,['nlap','ngaylap','ngayhoadon','invoicedate','issuedate']);
  const total=xmlField(root,['tgtttbso','tgtcthue','tongtienthanhtoan','totalpayment','totalamount','amountdue']);
- const data={file,sellerTax:normalizeTax(sellerTax),seller:xmlField(root,['ten','tennguoiban','sellername','tendv'],sellerSec),buyerTax:normalizeTax(buyerTax),buyer:xmlField(root,['ten','tennguoimua','buyername','tenkh'],buyerSec),formCode:'',series,number,date:dateNorm(date),amount:money(total),currency:xmlField(root,['dvtte','loaitien','currency'])||'VND',item:xmlField(root,['tenhang','tenhh','tenhanghoa','description','ten']),account:'',debtAmount:'',paidDate:'',paidAmount:'',raw:root.textContent,sourceMode:'XML',evidence:{}};
+ const data={file,sellerTax:normalizeTax(sellerTax),seller:xmlField(root,['ten','tennguoiban','sellername','tendv'],sellerSec),buyerTax:normalizeTax(buyerTax),buyer:xmlField(root,['ten','tennguoimua','buyername','tenkh'],buyerSec),formCode,series,number,date:dateNorm(date),amount:money(total),currency:xmlField(root,['dvtte','loaitien','currency'])||'VND',item:xmlField(root,['tenhang','tenhh','tenhanghoa','description','ten']),account:'',debtAmount:'',paidDate:'',paidAmount:'',raw:root.textContent,sourceMode:'XML',evidence:{}};
  data.formCode=data.series?(data.series.match(/^\d/)||[''])[0]:'';
  const fallback=parseText(root.textContent,file);
  for(const k of ['sellerTax','seller','buyerTax','buyer','series','number','date','amount','item'])if(!data[k]&&fallback[k])data[k]=fallback[k];
