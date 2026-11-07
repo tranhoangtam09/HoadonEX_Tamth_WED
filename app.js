@@ -126,26 +126,41 @@ function parseText(t,file){
  // Robust invoice identifier parser anchored to the labels, independent of their
  // position within the title row. PDF.js can put title, label and value in one row
  // or split them into adjacent rows / text items.
- const headerLines=lines.slice(0,Math.min(lines.length,80));
- const seriesLabel=/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i;
+ // Layout-tolerant invoice identifier cluster.
+ // PDF text engines can reorder labels and values: locate the series-shaped token
+ // near either Vietnamese or English label, then its adjacent standalone number.
+ const headerLines=lines.slice(0,Math.min(lines.length,100));
+ const seriesLabel=/Ký hiệu|Sign\s*\)?\s*[:：]?/i;
+ const numberLabel=/Số|No\s*\)?\s*[:：]?/i;
  let fullSeries='',number='',seriesLine=-1;
+ const seriesRx=/\b([0-9][A-Z][A-Z0-9]{2,17})\b/i;
+ // Find the explicit Ký hiệu label and the code within a compact neighborhood,
+ // allowing the PDF text layer to place the code before the label.
  for(let i=0;i<headerLines.length&&!fullSeries;i++){
-  const m=seriesLabel.exec(headerLines[i]);if(!m)continue;
-  const tail=headerLines[i].slice(m.index+m[0].length);
-  let v=tail.match(/[:：\s-]*([0-9][A-Z][A-Z0-9]{2,17})\b/i);
-  if(!v)for(let j=i+1;j<Math.min(headerLines.length,i+5);j++){const q=headerLines[j].match(/^\s*([0-9][A-Z][A-Z0-9]{2,17})\s*$/i);if(q){v=q;break;}}
-  if(v){fullSeries=v[1].toUpperCase();seriesLine=i;}
- }
- // Require the explicit colon in Số: / Số (No): and keep it close to Ký hiệu.
- // Address patterns like "Số 406" and "Số 472" are intentionally rejected.
- if(seriesLine>=0){
-  for(let i=Math.max(0,seriesLine-2);i<Math.min(headerLines.length,seriesLine+5)&&!number;i++){
-   const line=headerLines[i],re=/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]\s*/ig;let m;
-   while((m=re.exec(line))!==null){
-    const tail=line.slice(m.index+m[0].length);let v=tail.match(/^([0-9]{5,25})\b/);
-    if(!v)for(let j=i+1;j<Math.min(headerLines.length,seriesLine+6);j++){const q=headerLines[j].match(/^\s*([0-9]{5,25})\s*$/);if(q){v=q;break;}}
-    if(v){number=v[1];break;}
+  if(!/Ký hiệu|Sign/i.test(headerLines[i]))continue;
+  for(let d=0;d<=6&&!fullSeries;d++){
+   for(const j of d===0?[i]:[i+d,i-d]){
+    if(j<0||j>=headerLines.length)continue;
+    const m=headerLines[j].match(seriesRx);
+    if(m){fullSeries=m[1].toUpperCase();seriesLine=j;break;}
    }
+  }
+ }
+ // Number must be a standalone digit token in the same small heading cluster.
+ // A nearby explicit Số / No label is required, in either extracted text order.
+ if(seriesLine>=0){
+  const clusterStart=Math.max(0,seriesLine-5),clusterEnd=Math.min(headerLines.length,seriesLine+6);
+  const cluster=headerLines.slice(clusterStart,clusterEnd);
+  const hasNumberLabel=cluster.some(x=>numberLabel.test(x));
+  if(hasNumberLabel){
+   const candidates=[];
+   for(let j=clusterStart;j<clusterEnd;j++){
+    if(Math.abs(j-seriesLine)>3)continue;
+    const q=headerLines[j].match(/^\s*([0-9]{5,25})\s*$/);
+    if(q)candidates.push({value:q[1],distance:Math.abs(j-seriesLine),index:j});
+   }
+   candidates.sort((x,y)=>x.distance-y.distance||x.index-y.index);
+   number=candidates[0]?.value||'';
   }
  }
  const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
