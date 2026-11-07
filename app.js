@@ -381,18 +381,71 @@ function render(){
  });
 }
 async function exportWorkbook(kind){
- const required=kind==='transfer'?['buyerTax','buyer','series','number','date','amount']:['sellerTax','seller','series','number','date','amount'];
- const blocking=[];
- state.rows.forEach((r,i)=>{
-  const missing=required.filter(k=>!clean(r[k]));
-  if(missing.length)blocking.push('Hồ sơ '+(i+1)+': thiếu '+missing.join(', '));
-  if(r.duplicateOf)blocking.push('Hồ sơ '+(i+1)+': hóa đơn trùng');
-  if((r.checks||[]).some(x=>/không khớp|không tồn tại|không hợp lệ|MST đơn vị phát hành phần mềm/i.test(x)))blocking.push('Hồ sơ '+(i+1)+': có cảnh báo trọng yếu');
- });
- if(blocking.length){status('Chưa thể xuất để tránh sai dữ liệu: '+blocking.slice(0,4).join(' · '));alert('Cần xác minh trước khi xuất:\n\n'+blocking.slice(0,12).join('\n'));return;}
- if(!confirm('Đã kiểm tra các trường bắt buộc và cảnh báo trọng yếu. Bạn xác nhận dữ liệu đã được đối chiếu với hóa đơn gốc để xuất Excel?'))return;
+ const strict=$('#strictExport')?.checked===true;
+ if(strict){
+  const required=kind==='transfer'?['buyerTax','buyer','series','number','date','amount']:['sellerTax','seller','series','number','date','amount'];
+  const blocking=[];
+  state.rows.forEach((r,i)=>{
+   const missing=required.filter(k=>!clean(r[k]));
+   if(missing.length)blocking.push('Hồ sơ '+(i+1)+': thiếu '+missing.join(', '));
+   if(r.duplicateOf)blocking.push('Hồ sơ '+(i+1)+': hóa đơn trùng');
+   if((r.checks||[]).some(x=>/không khớp|không tồn tại|không hợp lệ|MST đơn vị phát hành phần mềm/i.test(x)))blocking.push('Hồ sơ '+(i+1)+': có cảnh báo trọng yếu');
+  });
+  if(blocking.length){status('Chế độ nghiêm ngặt: còn dữ liệu cần xác minh.');alert('Cần xác minh trước khi xuất:\n\n'+blocking.slice(0,12).join('\n'));return;}
+  if(!confirm('Đã kiểm tra các trường bắt buộc. Bạn xác nhận dữ liệu đã được đối chiếu với hóa đơn gốc?'))return;
+ }
  return exportWorkbookBase(kind);
 }
+
+const mergeFiles=[];
+function renderMergeFiles(){
+ const box=$('#mergeFileList');if(!box)return;
+ box.innerHTML=mergeFiles.map((f,i)=>'<div class="merge-file"><span class="merge-index">'+(i+1)+'.</span><span class="merge-name">'+esc(f.name)+' <small>('+Math.max(1,Math.round(f.size/1024))+' KB)</small></span><span class="merge-actions"><button type="button" class="btn btn-quiet merge-move" data-up="'+i+'" '+(i===0?'disabled':'')+'>↑</button><button type="button" class="btn btn-quiet merge-move" data-down="'+i+'" '+(i===mergeFiles.length-1?'disabled':'')+'>↓</button><button type="button" class="btn btn-quiet merge-remove" data-remove="'+i+'">Xóa</button></span></div>').join('');
+ $('#mergeCount').textContent=mergeFiles.length+'/10 tệp';
+ $('#mergePdfBtn').disabled=mergeFiles.length===0;
+ box.querySelectorAll('[data-remove]').forEach(b=>b.addEventListener('click',()=>{mergeFiles.splice(+b.dataset.remove,1);renderMergeFiles();}));
+ box.querySelectorAll('[data-up]').forEach(b=>b.addEventListener('click',()=>{const i=+b.dataset.up;if(i>0){[mergeFiles[i-1],mergeFiles[i]]=[mergeFiles[i],mergeFiles[i-1]];renderMergeFiles();}}));
+ box.querySelectorAll('[data-down]').forEach(b=>b.addEventListener('click',()=>{const i=+b.dataset.down;if(i<mergeFiles.length-1){[mergeFiles[i+1],mergeFiles[i]]=[mergeFiles[i],mergeFiles[i+1]];renderMergeFiles();}}));
+}
+function addMergeFiles(incoming){
+ const accepted=incoming.filter(f=>/\.pdf$|\.(?:jpe?g|png|webp)$/i.test(f.name));
+ for(const f of accepted){if(mergeFiles.length>=10)break;if(!mergeFiles.some(x=>x.name===f.name&&x.size===f.size))mergeFiles.push(f);}
+ renderMergeFiles();
+ const rejected=incoming.length-accepted.length;
+ if(rejected)status('Một số tệp không đúng định dạng. Chỉ nhận PDF, JPG, PNG, WEBP.');
+ else if(incoming.length+mergeFiles.length>10)status('Giới hạn tối đa là 10 tệp.');
+}
+async function imageToPdfPage(pdfDoc,file){
+ const bitmap=await createImageBitmap(file);
+ const scale=Math.min(2,3000/Math.max(bitmap.width,bitmap.height));
+ const canvas=document.createElement('canvas');canvas.width=Math.round(bitmap.width*scale);canvas.height=Math.round(bitmap.height*scale);
+ canvas.getContext('2d').drawImage(bitmap,0,0,canvas.width,canvas.height);
+ const png=await pdfDoc.embedPng(await canvas.toDataURL('image/png'));
+ const page=pdfDoc.addPage([png.width,png.height]);page.drawImage(png,{x:0,y:0,width:png.width,height:png.height});
+}
+async function mergeToPdf(){
+ if(!mergeFiles.length)return;
+ if(!window.PDFLib?.PDFDocument){status('Không tải được thư viện gộp PDF. Hãy tải lại trang khi có Internet.');return;}
+ $('#mergePdfBtn').disabled=true;
+ try{
+  const out=await PDFLib.PDFDocument.create();let pageCount=0;
+  for(let i=0;i<mergeFiles.length;i++){
+   const f=mergeFiles[i];status('Đang gộp '+f.name+' ('+(i+1)+'/'+mergeFiles.length+')');
+   if(/\.pdf$/i.test(f.name)){
+    const src=await PDFLib.PDFDocument.load(await f.arrayBuffer(),{ignoreEncryption:false});
+    const copied=await out.copyPages(src,src.getPageIndices());copied.forEach(p=>out.addPage(p));pageCount+=copied.length;
+   }else{await imageToPdfPage(out,f);pageCount++;}
+  }
+  if(!pageCount)throw Error('Không tìm thấy trang hợp lệ để gộp.');
+  const bytes=await out.save(),blob=new Blob([bytes],{type:'application/pdf'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download='Gop_hoa_don_'+new Date().toISOString().slice(0,10)+'.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);
+  status('Đã gộp '+mergeFiles.length+' tệp thành PDF gồm '+pageCount+' trang.');
+ }catch(e){console.error(e);status('Không thể gộp PDF: '+(e.message||e));}
+ finally{$('#mergePdfBtn').disabled=mergeFiles.length===0;}
+}
+$('#mergeFilesInput').addEventListener('change',e=>{addMergeFiles([...e.target.files]);e.target.value='';});
+$('#mergePdfBtn').addEventListener('click',mergeToPdf);
+
 
 $('#fileInput').addEventListener('change',e=>addFiles([...e.target.files]));$('#processBtn').addEventListener('click',process);$('#clearBtn').addEventListener('click',()=>{if(confirm('Xóa toàn bộ hồ sơ của lô hiện tại?')){state.files=[];state.rows=[];$('#fileInput').value='';$('#fileList').innerHTML='';render();status('Đã xóa lô hiện tại.');}});$('#statusFilter').addEventListener('change',render);$('#deleteErrors').addEventListener('click',()=>{if(confirm('Xóa tất cả hồ sơ không nhận dạng?')){state.rows=state.rows.filter(r=>review(r)!=='Không nhận dạng');render();}});$('#transferTemplate').addEventListener('change',e=>loadTemplate('transfer',e.target.files[0]));$('#offsetTemplate').addEventListener('change',e=>loadTemplate('offset',e.target.files[0]));$('#exportTransfer').addEventListener('click',()=>exportWorkbook('transfer'));$('#exportOffset').addEventListener('click',()=>exportWorkbook('offset'));const dz=$('#dropzone');['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.add('dragging');}));['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.classList.remove('dragging');}));dz.addEventListener('drop',e=>addFiles([...e.dataTransfer.files]));render();
 })();
