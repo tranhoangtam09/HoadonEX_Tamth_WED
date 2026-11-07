@@ -131,14 +131,14 @@ function parseText(t,file){
  const seriesLabel=/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i;
  const numberLabel=/^\s*Số(?:\s*\(No\))?\s*[:：]?\s*(.*)$/i;
  let fullSeries='',number='';
- // Series: value must be explicitly attached to the "Ký hiệu" label or be the
- // next standalone code line. A company tax code or address number is not eligible.
+ // Series: read the contiguous code immediately after "Ký hiệu" / "Ký hiệu (Sign)".
+ // Its first character is the form code; all remaining characters are the invoice series.
  for(let i=0;i<headerLines.length;i++){
   const m=headerLines[i].match(seriesLabel);
   if(!m)continue;
   const tail=headerLines[i].slice(m.index+m[0].length);
-  let v=tail.match(/[:：]?\s*([0-9][A-Z][A-Z0-9]{2,15})\b/i);
-  if(!v&&headerLines[i+1])v=headerLines[i+1].match(/^\s*([0-9][A-Z][A-Z0-9]{2,15})\s*$/i);
+  let v=tail.match(/[:：]?\s*([0-9][A-Z0-9]{3,17})\b/i);
+  if(!v&&headerLines[i+1])v=headerLines[i+1].match(/^\s*([0-9][A-Z0-9]{3,17})\s*$/i);
   if(v){fullSeries=v[1].toUpperCase();break;}
  }
  // Invoice number: exact "Số:" / "Số (No):" label only; if value is on next line,
@@ -156,7 +156,7 @@ function parseText(t,file){
  }
  // Handle PDF text layers that put both labels and values on the same visual line.
  if(!fullSeries){
-  const m=headerText.match(/Ký hiệu(?:\s*\(Sign\))?\s*[:：]\s*([0-9][A-Z][A-Z0-9]{2,15})/i);
+  const m=headerText.match(/Ký hiệu(?:\s*\(Sign\))?\s*[:：]\s*([0-9][A-Z0-9]{3,17})/i);
   if(m)fullSeries=m[1].toUpperCase();
  }
  if(!number){
