@@ -43,7 +43,7 @@ Vào **Settings → Pages**, chọn **Deploy from a branch**, branch `main`, fol
 HTML, CSS, JavaScript, PDF.js, Tesseract.js, ExcelJS, GitHub Pages.
 
 ## Đối chiếu bộ hóa đơn kiểm thử người dùng cung cấp
-Đã phân tích nội dung và bố cục 7 PDF thuộc 3 kiểu mẫu: MISA–Long Sinh, MISA–Ngọc Trai (hóa đơn 2 trang), FAST–Dầu khí Đồng Tháp. Các giá trị đối chiếu chuẩn:
+Đã phân tích nội dung và bố cục 6 PDF thuộc 3 kiểu mẫu: MISA–Long Sinh, MISA–Ngọc Trai (hóa đơn 2 trang), FAST–Dầu khí Đồng Tháp. Các giá trị đối chiếu chuẩn:
 
 | Tệp / số hóa đơn | MST đơn vị phát hành | Ký hiệu | Ngày | Tổng thanh toán (VND) |
 |---|---:|---|---|---:|
