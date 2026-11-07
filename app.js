@@ -69,6 +69,40 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 }
 
 // Multi-stage recognition: template-aware extraction + OCR fallback + confidence checks.
+function extractInvoiceIdCluster(source){
+ const raw=String(source||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
+ const title=/HÓA ĐƠN|HOA DON|VAT Invoice/i.exec(raw);
+ const start=title?Math.max(0,title.index-120):0;
+ const header=raw.slice(start,Math.min(raw.length,(title?title.index+1100:900)));
+ const labels=[...header.matchAll(/Ký hiệu(?:\s*\(\s*Sign\s*\))?|Ký hiệu hóa đơn|Sign\s*\)?/gi)];
+ const codes=[...header.matchAll(/\b(\d[A-Z][A-Z0-9]{3,17})\b/g)];
+ let codeHit=null;
+ for(const c of codes){
+  const at=c.index;
+  const label=labels.map(x=>({d:Math.abs(at-(x.index+x[0].length)),x})).sort((a,b)=>a.d-b.d)[0];
+  if(label&&label.d<=220){codeHit={value:c[1].toUpperCase(),index:at,labelDistance:label.d};break;}
+ }
+ if(!codeHit)return {formCode:'',series:'',number:''};
+ const numberLabels=[...header.matchAll(/(?:^|[^A-Z])(?:Số|No\s*\)?)\s*[:：]/gim)];
+ const digits=[...header.matchAll(/\b(\d{5,25})\b/g)];
+ let numberHit=null;
+ for(const n of digits){
+  const label=numberLabels.map(x=>({d:Math.abs(n.index-(x.index+x[0].length)),x})).sort((a,b)=>a.d-b.d)[0];
+  if(label&&label.d<=180&&Math.abs(n.index-codeHit.index)<=320){
+   if(!numberHit||label.d<numberHit.distance)numberHit={value:n[1],distance:label.d};
+  }
+ }
+ const full=codeHit.value;
+ return {formCode:full.slice(0,1),series:full.slice(1),number:numberHit?.value||''};
+}
+function applyInvoiceIdCluster(record){
+ if(!record||!record.raw)return record;
+ const found=extractInvoiceIdCluster(record.raw);
+ if(found.formCode&&found.series){record.formCode=found.formCode;record.series=found.series;}
+ if(found.number)record.number=found.number;
+ record.identifierEvidence=found;
+ return record;
+}
 function parseText(t,file){
  const raw=String(t||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
  const lines=raw.split('\n').map(x=>x.replace(/[ \t]+/g,' ').trim()).filter(Boolean);
@@ -182,6 +216,7 @@ function parseText(t,file){
  }
  const item=extractItem(raw);
  const r={file,sellerTax,seller:cleanLine(seller),buyerTax,buyer:cleanLine(buyer),formCode,series,number,orderNumber,date:dateNorm(dateRaw),amount,currency:'VND',item,account:'',debtAmount:'',paidDate:'',paidAmount:'',raw,sourceText:raw};
+ applyInvoiceIdCluster(r);
  r.checks=validateInvoice(r);r.confidence=confidenceScore(r);return r;
 }
 function validateInvoice(r){
@@ -334,7 +369,7 @@ function professionalize(r){
 function review(r){if(r.error)return 'Không nhận dạng';if(r.duplicateOf)return 'Trùng hóa đơn';const missing=['sellerTax','seller','buyerTax','series','number','date','amount'].filter(k=>!clean(r[k]));return missing.length===0&&!(r.checks||[]).length?'Đủ trường hóa đơn':'Cần rà soát';}
 function renderBase(){const rows=state.rows,filter=$('#statusFilter').value;$('#fileCount').textContent=rows.length;$('#countTotal').textContent=rows.length;$('#countOk').textContent=rows.filter(r=>review(r)==='Đủ trường hóa đơn').length;$('#countReview').textContent=rows.filter(r=>review(r)==='Cần rà soát').length;$('#countError').textContent=rows.filter(r=>review(r)==='Không nhận dạng').length;const shown=rows.map((r,i)=>({...r,_i:i})).filter(r=>filter==='all'||(filter==='ok'&&review(r)==='Đủ trường hóa đơn')||(filter==='review'&&review(r)==='Cần rà soát')||(filter==='error'&&review(r)==='Không nhận dạng')||(filter==='duplicate'&&review(r)==='Trùng hóa đơn'));$('#resultsBody').innerHTML=shown.length?shown.map(r=>'<tr><td>'+(r._i+1)+'</td><td>'+esc(r.file)+'</td>'+fields.map(k=>'<td><input class="cell" data-i="'+r._i+'" data-k="'+k+'" value="'+esc(r[k]||'')+'" aria-label="'+esc(k)+'"></td>').join('')+'<td><span class="state-pill '+(review(r)==='Đủ trường hóa đơn'?'ok':review(r)==='Không nhận dạng'?'bad':'warn')+'">'+review(r)+' · '+(r.confidence??0)+'%</span><div class="cell-warning">'+esc((r.checks||[]).join(' · '))+'</div></td><td><button class="btn btn-quiet row-delete" data-delete="'+r._i+'">Xóa</button></td></tr>').join(''):'<tr><td colspan="19" class="empty">Không có hồ sơ phù hợp.</td></tr>';$('#resultsBody').querySelectorAll('.cell').forEach(el=>el.addEventListener('change',()=>{state.rows[+el.dataset.i][el.dataset.k]=el.value;render();}));$('#resultsBody').querySelectorAll('[data-delete]').forEach(el=>el.addEventListener('click',()=>{state.rows.splice(+el.dataset.delete,1);render();}));}
 function addFiles(files){for(const f of files)if(!state.files.some(x=>x.name===f.name&&x.size===f.size))state.files.push(f);$('#fileCount').textContent=state.files.length;$('#fileList').innerHTML=state.files.map(f=>'<div class="file-item"><span>'+esc(f.name)+'</span><span>'+Math.round(f.size/1024)+' KB</span></div>').join('');}
-async function process(){if(!state.files.length){status('Hãy chọn ít nhất một hóa đơn.');return;}$('#processBtn').disabled=true;const fresh=[];let success=0;try{for(let i=0;i<state.files.length;i++){const f=state.files[i];status('Đang xử lý '+f.name+' ('+(i+1)+'/'+state.files.length+')');try{const r=await readFile(f);if(!r.file)r.file=f.name;fresh.push(r);success++;}catch(e){fresh.push({file:f.name,error:e.message});}}if(success){state.rows=fresh.map(r=>r.error?r:professionalize(r));detectDuplicates(state.rows);state.rows.forEach(r=>{if(!r.error){r.checks=[...new Set([...(r.checks||[]),...(r.duplicateOf?['Trùng số hóa đơn trong lô']:[])])];r.confidence=scoreInvoice(r);}});render();status('Đã xử lý '+success+'/'+fresh.length+' tệp. Đã chạy kiểm tra cấu trúc, số tiền và trùng lặp. Vui lòng rà soát cảnh báo.');}else{status('Lô mới không đọc được tệp nào; giữ nguyên lô dữ liệu trước đó.');}}finally{$('#processBtn').disabled=false;}}
+async function process(){if(!state.files.length){status('Hãy chọn ít nhất một hóa đơn.');return;}$('#processBtn').disabled=true;const fresh=[];let success=0;try{for(let i=0;i<state.files.length;i++){const f=state.files[i];status('Đang xử lý '+f.name+' ('+(i+1)+'/'+state.files.length+')');try{const r=applyInvoiceIdCluster(await readFile(f));if(!r.file)r.file=f.name;fresh.push(r);success++;}catch(e){fresh.push({file:f.name,error:e.message});}}if(success){state.rows=fresh.map(r=>r.error?r:professionalize(r));detectDuplicates(state.rows);state.rows.forEach(r=>{if(!r.error){r.checks=[...new Set([...(r.checks||[]),...(r.duplicateOf?['Trùng số hóa đơn trong lô']:[])])];r.confidence=scoreInvoice(r);}});render();status('Đã xử lý '+success+'/'+fresh.length+' tệp. Đã chạy kiểm tra cấu trúc, số tiền và trùng lặp. Vui lòng rà soát cảnh báo.');}else{status('Lô mới không đọc được tệp nào; giữ nguyên lô dữ liệu trước đó.');}}finally{$('#processBtn').disabled=false;}}
 function loadTemplate(kind,file){if(!file)return;state.templates[kind]=file;$('#'+kind+'TemplateStatus').textContent='Đã chọn: '+file.name;}
 async function exportWorkbookBase(kind){const file=state.templates[kind];if(!file){status('Bạn cần tải lên file Excel mẫu gốc trước khi xuất.');return;}if(!state.rows.length){status('Chưa có dữ liệu hóa đơn.');return;}if(!window.ExcelJS){status('Không tải được ExcelJS.');return;}try{status('Đang nạp và điền biểu mẫu gốc…');const wb=new ExcelJS.Workbook();await wb.xlsx.load(await file.arrayBuffer());const sheetName=kind==='transfer'?'Bảng kê hóa đơn':'Bảng kê hóa đơn GN bù đắp';const ws=wb.getWorksheet(sheetName);if(!ws)throw Error('Không tìm thấy sheet "'+sheetName+'" trong mẫu.');const start=3;const templateRow=ws.getRow(start);for(let r=start;r<=ws.rowCount;r++){const row=ws.getRow(r);for(let c=1;c<=ws.columnCount;c++){if(row.getCell(c).value!==undefined)row.getCell(c).value=null;}}const records=state.rows;records.forEach((x,i)=>{const rn=start+i,row=ws.getRow(rn);if(rn>start){for(let c=1;c<=ws.columnCount;c++){const src=templateRow.getCell(c),dst=row.getCell(c);if(src.style)dst.style=structuredClone(src.style);if(src.numFmt)dst.numFmt=src.numFmt;}}let vals;if(kind==='transfer'){vals=[i+1,x.buyerTax||'',x.buyer||'',x.account||'',x.formCode||'',x.series||'',(x.number||x.orderNumber||''),x.date||'',x.amount?Number(x.amount):null,x.currency||'VND',x.item||'',x.debtAmount?Number(money(x.debtAmount)):null];}else{vals=[i+1,x.sellerTax||'',x.seller||'',x.formCode||'',x.series||'',x.number||'',x.date||'',x.amount?Number(x.amount):null,x.currency||'VND',x.item||'',x.debtAmount?Number(money(x.debtAmount)):null,x.paidDate||'',x.paidAmount?Number(money(x.paidAmount)):null];}vals.forEach((v,j)=>{row.getCell(j+1).value=v;});row.commit();});const out=await wb.xlsx.writeBuffer(),blob=new Blob([out],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=kind==='transfer'?'Bang_ke_hoa_don_chuyen_khoan_VND.xlsx':'Bang_ke_hoa_don_bu_dap_VND.xlsx';a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);status('Đã xuất Excel theo workbook mẫu gốc. Các trường không có dữ liệu vẫn để trống.');}catch(e){console.error(e);status('Không thể xuất: '+e.message);}}
 
