@@ -41,3 +41,27 @@ Vào **Settings → Pages**, chọn **Deploy from a branch**, branch `main`, fol
 
 ## Công nghệ
 HTML, CSS, JavaScript, PDF.js, Tesseract.js, ExcelJS, GitHub Pages.
+
+## Đối chiếu bộ hóa đơn kiểm thử người dùng cung cấp
+Đã phân tích nội dung và bố cục 7 PDF thuộc 3 kiểu mẫu: MISA–Long Sinh, MISA–Ngọc Trai (hóa đơn 2 trang), FAST–Dầu khí Đồng Tháp. Các giá trị đối chiếu chuẩn:
+
+| Tệp / số hóa đơn | MST đơn vị phát hành | Ký hiệu | Ngày | Tổng thanh toán (VND) |
+|---|---:|---|---|---:|
+| 1C26TLS / 00004376 | 4200286988 | 1C26TLS | 07/09/2026 | 155280000 |
+| 1C26TLS / 00004467 | 4200286988 | 1C26TLS | 11/09/2026 | 8112000 |
+| 1C26TNT / 00000952 | 4200410988-001 | 1C26TNT | 23/06/2026 | 180777500 |
+| 1K26TKD / 16239 | 1400147351 | 1K26TKD | 06/10/2026 | 160980000 |
+| 1K26TKD / 16460 | 1400147351 | 1K26TKD | 09/10/2026 | 169320000 |
+| 1K26TKD / 16573 | 1400147351 | 1K26TKD | 14/10/2026 | 165720000 |
+
+MST người mua của hai nhóm Long Sinh và Ngọc Trai là 1900563381; nhóm FAST là 1900325771. Bộ kiểm thử cho thấy các trường hợp cần xử lý riêng: MST nằm trước nhãn “Mã số thuế” trong thứ tự text PDF; MST chi nhánh khác MST công ty mẹ; ký hiệu/số hóa đơn/ngày/tổng tiền có thể bị đảo thứ tự khi trích xuất text; tổng thanh toán phải lấy sau thuế (ví dụ hóa đơn Long Sinh 00004467 là 8.112.000, không phải tiền hàng 7.725.714).
+
+Parser đã được tăng cường để:
+- Tách vùng người bán và người mua trước khi lấy MST, tránh lấy nhầm MST phần mềm MISA hoặc MST bên mua.
+- Chuẩn hóa MST có dấu cách, giữ hậu tố chi nhánh dạng `-001`.
+- Nhận dạng ngày dạng “Ngày 07 tháng 09 năm 2026” và thứ tự text bị đảo.
+- Lấy tổng thanh toán, không nhầm với cộng tiền hàng hoặc tiền thuế.
+- Nhận dạng ký hiệu/số hóa đơn kể cả khi PDF trích xuất nhãn và giá trị theo thứ tự ngược.
+- Dùng chữ số đầu của ký hiệu làm gợi ý “Ký hiệu mẫu số”; cần rà soát theo mẫu biểu và loại hóa đơn thực tế.
+
+**Lưu ý:** Bảng trên là dữ liệu chuẩn đối chiếu đọc từ các PDF gốc, không phải tuyên bố rằng ứng dụng đã tự động vượt qua kiểm thử toàn bộ. Cần tải các PDF lên bản GitHub Pages sau cập nhật và so sánh kết quả từng trường. Nếu trường nào sai, chỉnh sửa trực tiếp trên bảng trước khi xuất.
