@@ -121,7 +121,7 @@ function parseText(t,file){
  // "Ký hiệu" ở dòng trên; giá trị ký hiệu ngay cạnh/sau nhãn.
  // "Số" ở dòng dưới; dãy số ngay cạnh/sau nhãn. Hỗ trợ PDF text, XML text và OCR.
  // Identify the invoice header cluster, not arbitrary digit strings across the whole PDF.
- const titleIndex=lines.findIndex(x=>/HÓA ĐƠN|HOA DON/i.test(x));
+ const titleIndex=lines.findIndex(x=>/^\s*(?:HÓA ĐƠN|HOA DON)\b/i.test(x));
  const headerFrom=titleIndex>=0?Math.max(0,titleIndex-15):0;
  const headerTo=titleIndex>=0?Math.min(lines.length,titleIndex+13):Math.min(lines.length,45);
  const headerLines=lines.slice(headerFrom,headerTo);
