@@ -40,30 +40,52 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 function parseText(t,file){
  const r=parseTextLegacy(t,file), raw=String(t||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
  const lines=raw.split('\n').map(x=>x.replace(/[ \t]+/g,' ').trim()).filter(Boolean);
- const digits=s=>String(s||'').replace(/[^0-9]/g,'');
+ const normalizeTaxValue=v=>{const z=String(v||'').replace(/[ .]/g,'').trim();return /^(\d{10}|\d{12}|\d{10}-\d{3})$/.test(z)?z:'';};
  const taxAt=(start,end)=>{
-   const part=lines.slice(Math.max(0,start),Math.max(start,end)).join('\n');
-   const patterns=[/(?:Mã\s*số\s*thuế|MST|Tax\s*code)\s*[:：]?\s*([0-9][0-9 .-]{8,22})/i,/([0-9][0-9 .-]{8,22})\s*(?:Mã\s*số\s*thuế|MST|Tax\s*code)/i];
-   for(const p of patterns){const m=part.match(p);if(m){const v=m[1].replace(/\s/g,'');if(/^\d{10}(?:-\d{3})?$/.test(v))return v;}}
-   return '';
+  const part=lines.slice(Math.max(0,start),Math.max(start,end)).join('\n');
+  const patterns=[/(?:Mã\s*số\s*thuế|MST|Tax\s*code)\s*[:：]?\s*([0-9][0-9 .-]{8,24})/i,/([0-9][0-9 .-]{8,24})\s*(?:Mã\s*số\s*thuế|MST|Tax\s*code)/i];
+  for(const p of patterns){const m=part.match(p);if(m){const v=normalizeTaxValue(m[1]);if(v)return v;}}
+  return '';
  };
  const sellIdx=lines.findIndex(x=>/Đơn vị bán hàng|Tên người bán|Seller name/i.test(x));
- const buyIdx=lines.findIndex(x=>/Họ tên người mua hàng|Tên đơn vị mua hàng|Buyer/i.test(x));
- let st=sellIdx>=0?taxAt(sellIdx, buyIdx>sellIdx?buyIdx:Math.min(lines.length,sellIdx+20)):'';
- if(!st){const topEnd=buyIdx>0?buyIdx:Math.min(lines.length,20);st=taxAt(0,topEnd);if(st==='0101243150')st='';}
- let bt=buyIdx>=0?taxAt(buyIdx,lines.length):'';
+ const buyIdx=lines.findIndex(x=>/Họ tên người mua hàng|Tên khách hàng|Tên đơn vị mua hàng|Company'?s name|Buyer/i.test(x));
+ const buyerStart=buyIdx>=0?buyIdx:lines.findIndex(x=>/^Tên đơn vị\s*[:：]/i.test(x));
+ let st=sellIdx>=0?taxAt(sellIdx,buyerStart>sellIdx?buyerStart:Math.min(lines.length,sellIdx+24)):'';
+ if(!st){const topEnd=buyerStart>0?buyerStart:Math.min(lines.length,24);st=taxAt(0,topEnd);if(st==='0101243150'||st==='0100109106')st='';}
+ let bt=buyerStart>=0?taxAt(buyerStart,lines.length):'';
  if(st)r.sellerTax=st;
  if(bt)r.buyerTax=bt;
- const seriesMatch=raw.match(/(?:Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9A-Z]{4,18})/i);
+
+ const seriesMatch=raw.match(/(?:Ký hiệu(?:\s*\(Serial\)|\s*\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9A-Z]{4,18})/i);
  if(seriesMatch)r.series=seriesMatch[1].trim();
- const noMatch=raw.match(/(?:Số hóa đơn|Số\s*(?:\(No\))?|Invoice\s*No\.?)\s*[:：]?\s*([0-9]{3,25})/i);
+ const noMatch=raw.match(/(?:Số hóa đơn|Số\s*(?:\(No\.?\))?|Invoice\s*No\.?)\s*[:：]?\s*([0-9]{1,25})/i);
  if(noMatch)r.number=noMatch[1];
- const dateMatch=raw.match(/(?:Ngày(?:\s*\(Date\))?)\s*[:：]?\s*(\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}|\d{1,2}[/. -]\d{1,2}[/. -]\d{4})/i);
+ const dateMatch=raw.match(/(?:Ngày(?:\s*\(date\))?)\s*[:：]?\s*(\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}|\d{1,2}[/. -]\d{1,2}[/. -]\d{4})/i);
  if(dateMatch)r.date=dateNorm(dateMatch[1]);
- const totalMatch=raw.match(/(?:Tổng\s*(?:cộng\s*)?tiền\s*thanh\s*toán|III\.\s*Tổng cộng tiền thanh toán|Total amount)\s*[:：]?\s*([0-9][0-9., ]{2,})/i);
+
+ const totalPatterns=[
+  /(?:Tổng\s*(?:cộng\s*)?tiền\s*thanh\s*toán|III\.\s*Tổng cộng tiền thanh toán|Total\s*payment|Total\s*amount)\s*[:：]?\s*([0-9][0-9., ]{2,})/i,
+  /(?:Cộng\s*tiền\s*hàng\s*hóa,\s*dịch\s*vụ|Cộng\s*tiền\s*hàng|Total\s*amount)\s*[:：]?\s*([0-9][0-9., ]{2,})/i
+ ];
+ let totalMatch=null;
+ for(const p of totalPatterns){totalMatch=raw.match(p);if(totalMatch)break;}
  if(totalMatch)r.amount=money(totalMatch[1]);
- if(!r.buyer && buyIdx>=0){const b=lines.slice(buyIdx).find(x=>/^(?:CÔNG TY|DOANH NGHIỆP|HỘ KINH DOANH)/i.test(x));if(b)r.buyer=b;}
- if(!r.seller){const s=lines.find(x=>/^(?:CÔNG TY|CHI NHÁNH CÔNG TY)/i.test(x));if(s)r.seller=s;}
+
+ const buyerNameLine=lines.findIndex(x=>/^(?:Tên khách hàng|Tên đơn vị|Tên công ty|Company'?s name)\s*[:：]/i.test(x));
+ if(buyerNameLine>=0){
+  const v=lines[buyerNameLine].replace(/^(?:Tên khách hàng|Tên đơn vị|Tên công ty|Company'?s name)\s*[:：]\s*/i,'').trim();
+  if(v&&!/^(?:Mã số thuế|MST|Địa chỉ)/i.test(v))r.buyer=v;
+ }
+ if(!r.buyer&&buyerStart>=0){
+  const b=lines.slice(buyerStart).find(x=>/^(?:CÔNG TY|DOANH NGHIỆP|HỘ KINH DOANH|NGÂN HÀNG)/i.test(x));
+  if(b)r.buyer=b;
+ }
+ if(!r.seller){
+  const si=lines.findIndex(x=>/^(?:CÔNG TY|CHI NHÁNH CÔNG TY|DOANH NGHIỆP|NGUYỄN THỊ|ĐẶNG VĂN)/i.test(x));
+  if(si>=0)r.seller=lines[si];
+ }
+ r.sellerTax=normalizeTaxValue(r.sellerTax)||r.sellerTax;
+ r.buyerTax=normalizeTaxValue(r.buyerTax)||r.buyerTax;
  r.formCode=r.series?(r.series.match(/^\d/)||[''])[0]:'';
  r.sourceText=raw;
  r.checks=validateInvoice(r);
@@ -90,7 +112,7 @@ function confidenceScore(r){
  let score=Math.round(got/required.length*85);
  if(r.amount&&Number(r.amount)>0)score+=5;
  if(r.date&&/^\d{2}\/\d{2}\/\d{4}$/.test(r.date))score+=5;
- if(r.sellerTax&&/^\d{10}(?:-\d{3})?$/.test(r.sellerTax))score+=5;
+ if(r.sellerTax&&/^(?:\d{10}|\d{12}|\d{10}-\d{3})$/.test(r.sellerTax))score+=5;
  return Math.min(100,score);
 }
 function makeCanvas(source,scale=2.6,enhance=true){
@@ -339,7 +361,7 @@ function scoreInvoice(r){
  else if(r.sourceMode==='PDF text')score+=7;
  else if(r.sourceMode==='OCR tăng cường'||r.sourceMode==='OCR ảnh gốc')score+=Math.round((r.ocrConfidence||0)*.04);
  if(r.date){const m=r.date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);if(m){const d=new Date(+m[3],+m[2]-1,+m[1]);if(d.getDate()!==+m[1]||d.getMonth()!==+m[2]-1||d.getFullYear()!==+m[3])score-=15;}}
- if(r.sellerTax&&!/^(\d{10}|\d{13}|\d{10}-\d{3})$/.test(r.sellerTax))score-=15;
+ if(r.sellerTax&&!/^(\d{10}|\d{12}|\d{10}-\d{3})$/.test(r.sellerTax))score-=15;
  score-=Math.min(35,(r.checks||[]).length*7);
  score-=Math.min(25,(r.qrConflicts||[]).length*12);
  return Math.max(0,Math.min(100,score));
