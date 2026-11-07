@@ -120,35 +120,38 @@ function parseText(t,file){
  // Nhận diện cụm tiêu đề hóa đơn theo vị trí tương đối:
  // "Ký hiệu" ở dòng trên; giá trị ký hiệu ngay cạnh/sau nhãn.
  // "Số" ở dòng dưới; dãy số ngay cạnh/sau nhãn. Hỗ trợ PDF text, XML text và OCR.
- const headerStart=lines.findIndex(x=>/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i.test(x));
- let fullSeries='',number='';
- if(headerStart>=0){
-  const headerRows=lines.slice(headerStart,Math.min(lines.length,headerStart+7));
-  for(let i=0;i<headerRows.length;i++){
-   const line=headerRows[i];
-   if(!fullSeries){
-    const m=line.match(/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i);
-    if(m){
-     const after=line.slice(m.index+m[0].length);
-     let v=after.match(/[：:]?\s*([0-9][A-Z0-9]{3,17})/i);
-     if(!v&&headerRows[i+1])v=headerRows[i+1].match(/^\s*([0-9][A-Z0-9]{3,17})\s*$/i);
-     if(v)fullSeries=v[1].toUpperCase();
-    }
-   }
-   if(!number){
-    const m=line.match(/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?\s*([0-9]{3,25})/i);
-    if(m)number=m[1];
-    else if(/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?\s*$/i.test(line)&&headerRows[i+1]){
-     const v=headerRows[i+1].match(/^\s*([0-9]{3,25})\s*$/);
-     if(v)number=v[1];
-    }
-   }
+ // Identify the invoice header cluster, not arbitrary digit strings across the whole PDF.
+ const titleIndex=lines.findIndex(x=>/HÓA ĐƠN|HOA DON|VAT Invoice/i.test(x));
+ const headerFrom=titleIndex>=0?Math.max(0,titleIndex-2):0;
+ const headerTo=titleIndex>=0?Math.min(lines.length,titleIndex+18):Math.min(lines.length,45);
+ const headerLines=lines.slice(headerFrom,headerTo);
+ const headerText=headerLines.join(' ');
+ const seriesLabelAt=headerLines.findIndex(x=>/Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn/i.test(x));
+ const numberLabelAt=headerLines.findIndex(x=>/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?\s*$/i.test(x)||/(?:^|\s)Số(?:\s*\(No\))?\s*[:：]?\s*[0-9]/i.test(x));
+ const nearestCandidate=(labelIndex,rx,exclude=[])=>{
+  if(labelIndex<0)return '';
+  const found=[];
+  for(let i=Math.max(0,labelIndex-5);i<=Math.min(headerLines.length-1,labelIndex+5);i++){
+   const m=headerLines[i].match(rx);
+   if(!m)continue;
+   const v=m[1]||m[0];
+   if(exclude.some(x=>x.test(v)))continue;
+   found.push({v,d:Math.abs(i-labelIndex),i});
   }
- }
- // Fallback chỉ trong vùng tiêu đề gần cụm "Ký hiệu"; không quét toàn văn bản để lấy số tùy ý.
+  found.sort((x,y)=>x.d-y.d||x.i-y.i);
+  return found[0]?.v||'';
+ };
+ let fullSeries=first(headerText,[/(?:Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9][A-Z0-9]{3,17})/i]);
  if(!fullSeries){
-  const headerText=lines.slice(Math.max(0,headerStart),Math.min(lines.length,headerStart+7)).join(' ');
-  fullSeries=first(headerText,[/(?:Ký hiệu(?:\s*\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9][A-Z0-9]{3,17})/i]);
+  const si=seriesLabelAt;
+  fullSeries=nearestCandidate(si,/\b([0-9][A-Z]{1,4}[0-9]{2}[A-Z0-9]{1,10})\b/i);
+ }
+ // Number must be a 3-25 digit sequence close to the "Số" label and inside the invoice title block.
+ // Ignore years, dates, tax codes, account numbers and the series value.
+ let number=first(headerText,[/(?:Số(?:\s*\(No\))?)\s*[:：]?\s*([0-9]{3,25})\b/i]);
+ if(!number){
+  const ni=numberLabelAt>=0?numberLabelAt:headerLines.findIndex(x=>/^Số(?:\s*\(No\))?\s*[:：]?$/i.test(x));
+  number=nearestCandidate(ni,/\b([0-9]{3,25})\b/i,[/^20\d{2}$/]);
  }
  const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
  const series=fullSeries&&formCode?fullSeries.slice(1):fullSeries;
