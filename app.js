@@ -72,28 +72,33 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 function extractInvoiceIdCluster(source){
  const raw=String(source||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
  const title=/HÓA ĐƠN|HOA DON|VAT Invoice/i.exec(raw);
- const start=title?Math.max(0,title.index-120):0;
- const header=raw.slice(start,Math.min(raw.length,(title?title.index+1100:900)));
- const labels=[...header.matchAll(/Ký hiệu(?:\s*\(\s*Sign\s*\))?|Ký hiệu hóa đơn|Sign\s*\)?/gi)];
- const codes=[...header.matchAll(/\b(\d[A-Z][A-Z0-9]{3,17})\b/g)];
+ const from=title?Math.max(0,title.index-250):0;
+ const header=raw.slice(from,Math.min(raw.length,title?title.index+2200:2600));
+ // Flatten PDF.js text fragments but preserve their order. Values can occur
+ // before/after labels because PDF content streams are not always reading-order.
+ const flat=header.replace(/[\t\n ]+/g,' ');
+ const labelRx=/Ký hiệu(?:\s*\(\s*Sign\s*\))?|Ký hiệu hóa đơn|Sign\s*\)?/gi;
+ const codeRx=/\b(\d[A-Z][A-Z0-9]{3,17})\b/gi;
+ const labels=[...flat.matchAll(labelRx)],codes=[...flat.matchAll(codeRx)];
  let codeHit=null;
  for(const c of codes){
-  const at=c.index;
-  const label=labels.map(x=>({d:Math.abs(at-(x.index+x[0].length)),x})).sort((a,b)=>a.d-b.d)[0];
-  if(label&&label.d<=220){codeHit={value:c[1].toUpperCase(),index:at,labelDistance:label.d};break;}
+  const nearest=labels.map(x=>({distance:Math.abs(c.index-(x.index+x[0].length)),label:x})).sort((x,y)=>x.distance-y.distance)[0];
+  if(nearest&&nearest.distance<=320){codeHit={value:c[1].toUpperCase(),index:c.index};break;}
  }
- if(!codeHit)return {formCode:'',series:'',number:''};
- const numberLabels=[...header.matchAll(/(?:^|[^A-Z])(?:Số(?:\s*\(\s*No\s*\))?|No)\s*[:：]/gim)];
- const digits=[...header.matchAll(/\b(\d{5,25})\b/g)];
+ if(!codeHit)return {formCode:'',series:'',number:'',reason:'Không tìm thấy mã ký hiệu gần nhãn Ký hiệu/Sign'};
+ const numberLabelRx=/(?:^|[^A-Z])(?:Số(?:\s*\(\s*No\s*\))?|No)\s*[:：]/gi;
+ const numberLabels=[...flat.matchAll(numberLabelRx)];
+ const digitRx=/\b(\d{5,25})\b/g;
+ const digits=[...flat.matchAll(digitRx)];
  let numberHit=null;
  for(const n of digits){
-  const label=numberLabels.map(x=>({d:Math.abs(n.index-(x.index+x[0].length)),x})).sort((a,b)=>a.d-b.d)[0];
-  if(label&&label.d<=180&&Math.abs(n.index-codeHit.index)<=320){
-   if(!numberHit||label.d<numberHit.distance)numberHit={value:n[1],distance:label.d};
+  const nearest=numberLabels.map(x=>({distance:Math.abs(n.index-(x.index+x[0].length)),label:x})).sort((x,y)=>x.distance-y.distance)[0];
+  if(nearest&&nearest.distance<=220&&Math.abs(n.index-codeHit.index)<=520){
+   if(!numberHit||nearest.distance<numberHit.distance)numberHit={value:n[1],distance:nearest.distance};
   }
  }
  const full=codeHit.value;
- return {formCode:full.slice(0,1),series:full.slice(1),number:numberHit?.value||''};
+ return {formCode:full.slice(0,1),series:full.slice(1),number:numberHit?.value||'',reason:numberHit?'Đã tìm thấy nhãn Số/No và giá trị gần mã ký hiệu':'Tìm thấy ký hiệu nhưng chưa tìm thấy số gần nhãn Số/No'};
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
