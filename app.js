@@ -85,41 +85,41 @@ function parseText(t,file){
  }else if(buyerPersonIdx>=0){
   buyerTax=taxAtLabel(buyerPersonIdx,Math.min(lines.length,buyerPersonIdx+15));
  }
- const fullSeries=first(raw,[/(?:Ký hiệu\s*(?:\(Sign\))?|Ký hiệu hóa đơn)\s*[:：]?\s*([0-9A-Z]{4,18})/i]);
- // Theo mẫu Excel: mẫu số là ký tự đầu tiên (ví dụ 1); ký hiệu hóa đơn là phần còn lại (K26TKD).
- const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
- const series=fullSeries&&formCode?fullSeries.slice(1):fullSeries;
- // Invoice number is the digit sequence printed BELOW the invoice series.
- // Only inspect text AFTER the series label/value; never search the address/header before it.
- // This prevents house number (e.g. 472 Nguyễn Huệ), phone, account and PO numbers
- // from being mistaken for the invoice number.
- let number='';
- if(series){
-  const pos=raw.toUpperCase().indexOf(series.toUpperCase());
-  if(pos>=0){
-   const below=raw.slice(pos+series.length,pos+Math.min(260,raw.length-pos));
-   const rows=below.split(/\n+/).map(x=>x.replace(/[ \t]+/g,' ').trim()).filter(Boolean);
-   for(let i=0;i<Math.min(rows.length,6);i++){
-    // Explicit "Số:" label below the series; value may be on the same or next extracted line.
-    const label=rows[i].match(/^Số\s*(?:\(No\))?\s*[:：]?\s*(.*)$/i);
-    if(!label)continue;
-    const same=label[1].match(/^([0-9]{3,25})\b/);
-    if(same){number=same[1];break;}
-    for(let j=i+1;j<Math.min(rows.length,i+3);j++){
-     const next=rows[j].match(/^([0-9]{3,25})\s*$/);
-     if(next){number=next[1];break;}
-     // Stop if another field label intervenes; do not roam into body/address/order details.
-     if(/^(?:Ngày|Date|Mã|Địa chỉ|Tên|Họ tên|Hình thức|STT|Đơn vị|Ký bởi)/i.test(rows[j]))break;
+ // Nhận diện cụm tiêu đề hóa đơn theo vị trí tương đối:
+ // "Ký hiệu" ở dòng trên; giá trị ký hiệu ngay cạnh/sau nhãn.
+ // "Số" ở dòng dưới; dãy số ngay cạnh/sau nhãn. Hỗ trợ PDF text, XML text và OCR.
+ const headerStart=lines.findIndex(x=>/Ký hiệu(?:\\s*\\(Sign\\))?|Ký hiệu hóa đơn/i.test(x));
+ let fullSeries='',number='';
+ if(headerStart>=0){
+  const headerRows=lines.slice(headerStart,Math.min(lines.length,headerStart+7));
+  for(let i=0;i<headerRows.length;i++){
+   const line=headerRows[i];
+   if(!fullSeries){
+    const m=line.match(/Ký hiệu(?:\\s*\\(Sign\\))?|Ký hiệu hóa đơn/i);
+    if(m){
+     const after=line.slice(m.index+m[0].length);
+     let v=after.match(/[：:]?\\s*([0-9][A-Z0-9]{3,17})/i);
+     if(!v&&headerRows[i+1])v=headerRows[i+1].match(/^\\s*([0-9][A-Z0-9]{3,17})\\s*$/i);
+     if(v)fullSeries=v[1].toUpperCase();
     }
-    if(number)break;
    }
-   // Some PDF text layers place "Ký hiệu" and "Số" on the same line.
    if(!number){
-    const sameLine=below.match(/(?:^|\s)Số\s*(?:\(No\))?\s*[:：]\s*([0-9]{3,25})\b/i);
-    if(sameLine)number=sameLine[1];
+    const m=line.match(/(?:^|\\s)Số(?:\\s*\\(No\\))?\\s*[:：]?\\s*([0-9]{3,25})/i);
+    if(m)number=m[1];
+    else if(/(?:^|\\s)Số(?:\\s*\\(No\\))?\\s*[:：]?\\s*$/i.test(line)&&headerRows[i+1]){
+     const v=headerRows[i+1].match(/^\\s*([0-9]{3,25})\\s*$/);
+     if(v)number=v[1];
+    }
    }
   }
  }
+ // Fallback chỉ trong vùng tiêu đề gần cụm "Ký hiệu"; không quét toàn văn bản để lấy số tùy ý.
+ if(!fullSeries){
+  const headerText=lines.slice(Math.max(0,headerStart),Math.min(lines.length,headerStart+7)).join(' ');
+  fullSeries=first(headerText,[/(?:Ký hiệu(?:\\s*\\(Sign\\))?|Ký hiệu hóa đơn)\\s*[:：]?\\s*([0-9][A-Z0-9]{3,17})/i]);
+ }
+ const formCode=fullSeries&&/^\\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
+ const series=fullSeries&&formCode?fullSeries.slice(1):fullSeries;
  const orderNumber=first(raw,[/(?:Đơn\s*đặt\s*hàng|Purchase\s*order|PO\s*No\.?)\s*[:：]?\s*([A-Z0-9/-]{2,30})/i]);
  const dateRaw=first(raw,[/(?:Ngày(?:\s*\(Date\))?)\s*[:：]?\s*(\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}|\d{1,2}[/. -]\d{1,2}[/. -]\d{4})/i]);
  let amount='';
