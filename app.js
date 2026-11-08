@@ -71,30 +71,54 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 // Multi-stage recognition: template-aware extraction + OCR fallback + confidence checks.
 function extractInvoiceIdCluster(source){
  const raw=String(source||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
- // Work only near the first invoice title; the seller header may appear before it.
  const title=/HÓA\s*ĐƠN|HOA\s*DON|VAT\s*Invoice/i.exec(raw);
- const section=title?raw.slice(Math.max(0,title.index-1200),Math.min(raw.length,title.index+1200)):raw.slice(0,1800);
+ const section=title?raw.slice(Math.max(0,title.index-1400),Math.min(raw.length,title.index+1400)):raw.slice(0,2200);
+ const lines=section.split('\n').map(x=>x.replace(/[ \t]+/g,' ').trim()).filter(Boolean);
  const flat=section.replace(/[\t\r\n]+/g,' ').replace(/\s+/g,' ');
- // Series is read only from the explicit Ký hiệu/Sign label.
- const seriesRx=/(?:Ký\s*hiệu|Sign)\s*(?:\(\s*Sign\s*\))?\s*[:：]\s*(\d[A-Z][A-Z0-9]{2,17})/i;
- const sm=flat.match(seriesRx);
- if(!sm)return {formCode:'',series:'',number:'',reason:'Không tìm thấy ký hiệu sau nhãn Ký hiệu/Sign'};
- const full=sm[1].toUpperCase();
- // Number is read only from explicit Số (No): or Số: heading label.
- const numberRx=/\bSố\b\s*(?:\(\s*No\s*\))?\s*[:：]\s*([0-9]{3,25})/i;
- let number='';
- const headingAfterSeries=flat.slice(sm.index+sm[0].length,sm.index+sm[0].length+500);
- const nm=headingAfterSeries.match(numberRx);
- if(nm)number=nm[1];
- if(!number){
-  // Some PDF text layers reorder the two adjacent heading rows. Allow a nearby
-  // explicit label before the series but still require the same invoice heading.
-  const nearby=flat.slice(Math.max(0,sm.index-450),sm.index);
-  const prior=[...nearby.matchAll(/(?:\bSố\b\s*(?:\(\s*No\s*\))?|\bNo\b)\s*[:：]\s*([0-9]{3,25})/gi)];
-  if(prior.length)number=prior[prior.length-1][1];
+ // In this invoice layout, form code (Mẫu số) and series (Ký hiệu) are
+ // separate fields: e.g. Mẫu số=1, Ký hiệu=C26TNT.
+ const findLabelValue=(labelRx,valueRx,range=2)=>{
+  for(let i=0;i<lines.length;i++){
+   if(!labelRx.test(lines[i]))continue;
+   const local=lines.slice(i,Math.min(lines.length,i+range+1)).join(' ');
+   const m=local.match(valueRx);
+   if(m)return m[1]||m[0];
+  }
+  return '';
+ };
+ let formCode=findLabelValue(/Mẫu\s*số|Form\s*No|Form\s*number/i,/[:：]?\s*([0-9]{1,3})\b/i,2);
+ let series=findLabelValue(/Ký\s*hiệu|Serial\s*(?:No|number)?|Series/i,/[:：]?\s*([A-Z][A-Z0-9]{2,20})\b/i,2);
+ // Also accept combined form+series values such as 1C26TNT.
+ if(!series){
+  const combined=findLabelValue(/Ký\s*hiệu|Serial\s*(?:No|number)?|Series/i,/[:：]?\s*([0-9][A-Z][A-Z0-9]{2,20})\b/i,2);
+  if(combined){formCode=formCode||combined.slice(0,1);series=combined.slice(1);}
  }
- return {formCode:full.slice(0,1),series:full.slice(1),number,
-  reason:number?'Đã đọc số hóa đơn từ nhãn Số/No trong vùng tiêu đề':'Có ký hiệu nhưng chưa tìm thấy số hóa đơn sau nhãn Số/No'};
+ // Search explicit invoice-number labels; allow PDF.js to split label/value
+ // into separate text fragments or adjacent lines. Do not use arbitrary numbers.
+ const numberPatterns=[
+  /(?:Số\s*(?:hóa\s*đơn)?\s*(?:\(\s*No\s*\))?|Invoice\s*(?:No|number)|No)\s*[:：]?\s*([0-9]{3,25})/i,
+  /(?:Số\s*(?:hóa\s*đơn)?\s*(?:\(\s*No\s*\))?|Invoice\s*(?:No|number)|No)[^0-9]{0,90}([0-9]{3,25})/i
+ ];
+ let number='';
+ for(const rx of numberPatterns){
+  const m=flat.match(rx);
+  if(m){number=m[1];break;}
+ }
+ // Separate line fallback: label row followed by a numeric-only row.
+ if(!number){
+  for(let i=0;i<lines.length;i++){
+   if(!/(?:^|\b)(?:Số(?:\s*hóa\s*đơn)?|Invoice\s*(?:No|number)|No)(?:\b|\s|\()/i.test(lines[i]))continue;
+   const local=lines.slice(i,Math.min(lines.length,i+3)).join(' ');
+   const m=local.match(/(?:Số(?:\s*hóa\s*đơn)?|Invoice\s*(?:No|number)|No)[^0-9]{0,90}([0-9]{3,25})/i);
+   if(m){number=m[1];break;}
+  }
+ }
+ return {
+  formCode:String(formCode||'').trim(),
+  series:String(series||'').trim().toUpperCase(),
+  number:String(number||'').trim(),
+  reason:number?'Đã nhận dạng số hóa đơn theo nhãn Số/No': 'Chưa tìm thấy số gắn với nhãn Số/No trong vùng tiêu đề'
+ };
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
