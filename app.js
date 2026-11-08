@@ -70,35 +70,54 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 
 // Multi-stage recognition: template-aware extraction + OCR fallback + confidence checks.
 function extractInvoiceIdCluster(source){
- const raw=String(source||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
- const title=/HÓA ĐƠN|HOA DON|VAT Invoice/i.exec(raw);
- const from=title?Math.max(0,title.index-250):0;
- const header=raw.slice(from,Math.min(raw.length,title?title.index+2200:2600));
- // Flatten PDF.js text fragments but preserve their order. Values can occur
- // before/after labels because PDF content streams are not always reading-order.
- const flat=header.replace(/[\t\n ]+/g,' ');
- const labelRx=/Ký hiệu(?:\s*\(\s*Sign\s*\))?|Ký hiệu hóa đơn|Sign\s*\)?/gi;
- const codeRx=/\b(\d[A-Z][A-Z0-9]{3,17})\b/gi;
- const labels=[...flat.matchAll(labelRx)],codes=[...flat.matchAll(codeRx)];
- let codeHit=null;
- for(const c of codes){
-  const nearest=labels.map(x=>({distance:Math.abs(c.index-(x.index+x[0].length)),label:x})).sort((x,y)=>x.distance-y.distance)[0];
-  if(nearest&&nearest.distance<=320){codeHit={value:c[1].toUpperCase(),index:c.index};break;}
+ const raw=String(source||'').replace(/\\u00a0/g,' ').replace(/\\r/g,'\\n');
+ // Invoice ID exists only in the invoice-heading block, before buyer/seller details.
+ // Keep original newlines so a page's continuation/header repeats cannot contaminate it.
+ const titleRx=/HÓA\\s*ĐƠN|HOA\\s*DON|VAT\\s*Invoice/i;
+ const title=titleRx.exec(raw);
+ const from=title?Math.max(0,title.index-120):0;
+ const header=raw.slice(from,Math.min(raw.length,title?title.index+1500:1800));
+ const lines=header.split('\\n').map(x=>clean(x)).filter(Boolean);
+ const fullSeriesRx=/\\b(\\d[A-Z][A-Z0-9]{2,17})\\b/i;
+ const candidates=[];
+ // Find series only next to explicit Ký hiệu / Sign label; allow label and code
+ // in same row or adjacent extracted rows. Exclude MST and unrelated identifiers.
+ for(let i=0;i<lines.length;i++){
+  if(!/Ký\\s*hiệu|Sign/i.test(lines[i]))continue;
+  const area=[lines[i],lines[i-1]||'',lines[i+1]||''].join(' ');
+  const m=area.match(fullSeriesRx);
+  if(m)candidates.push({value:m[1].toUpperCase(),line:i});
  }
- if(!codeHit)return {formCode:'',series:'',number:'',reason:'Không tìm thấy mã ký hiệu gần nhãn Ký hiệu/Sign'};
- const numberLabelRx=/(?:^|[^A-Z])(?:Số(?:\s*\(\s*No\s*\))?|No)\s*[:：]/gi;
- const numberLabels=[...flat.matchAll(numberLabelRx)];
- const digitRx=/\b(\d{5,25})\b/g;
- const digits=[...flat.matchAll(digitRx)];
- let numberHit=null;
- for(const n of digits){
-  const nearest=numberLabels.map(x=>({distance:Math.abs(n.index-(x.index+x[0].length)),label:x})).sort((x,y)=>x.distance-y.distance)[0];
-  if(nearest&&nearest.distance<=220&&Math.abs(n.index-codeHit.index)<=520){
-   if(!numberHit||nearest.distance<numberHit.distance)numberHit={value:n[1],distance:nearest.distance};
+ let seriesHit=candidates[0]||null;
+ // Fallback handles text layers where label and code are split into individual runs.
+ if(!seriesHit){
+  const flat=header.replace(/[\\t ]+/g,' ');
+  const m=flat.match(/Ký\\s*hiệu(?:\\s*\\(\\s*Sign\\s*\\))?\\s*[:：]?\\s*(\\d[A-Z][A-Z0-9]{2,17})|(?:\\d[A-Z][A-Z0-9]{2,17})\\s*Ký\\s*hiệu/i);
+  if(m)seriesHit={value:(m[1]||m[0].match(/\\d[A-Z][A-Z0-9]{2,17}/i)[0]).toUpperCase(),line:0};
+ }
+ if(!seriesHit)return {formCode:'',series:'',number:'',reason:'Không tìm thấy mã ký hiệu cạnh nhãn Ký hiệu/Sign trong tiêu đề'};
+ // Search a bounded window after (or beside) the heading label for explicit Số/No.
+ // Captures inline "Số (No): 00001036", "Số: 00004376", and wrapped label/value lines.
+ const numberPatterns=[
+  /(?:^|[\\s|])Số\\s*(?:\\(\\s*No\\s*\\))?\\s*[:：]?\\s*([0-9]{3,25})(?=$|[\\s|])/i,
+  /(?:^|[\\s|])No\\s*[:：]?\\s*([0-9]{3,25})(?=$|[\\s|])/i,
+  /(?:^|[\\s|])Số\\s*(?:\\(\\s*No\\s*\\))?\\s*[:：]?\\s*\\n?\\s*([0-9]{3,25})(?=$|[\\s|])/i
+ ];
+ const seriesLine=seriesHit.line;
+ const local=lines.slice(Math.max(0,seriesLine-1),Math.min(lines.length,seriesLine+5)).join(' ');
+ let numberHit='';
+ for(const rx of numberPatterns){const m=local.match(rx);if(m){numberHit=m[1];break;}}
+ // A few PDF text layers put Số and No on one row and the value on the next row.
+ if(!numberHit){
+  const idx=lines.findIndex((x,i)=>i>=Math.max(0,seriesLine-1)&&i<=seriesLine+4&&/(?:^|\\s)(?:Số|No)(?:\\s|:|$)/i.test(x));
+  if(idx>=0){
+   const area=lines.slice(idx,Math.min(lines.length,idx+3)).join(' ');
+   const m=area.match(/(?:Số|No)[^0-9]{0,40}([0-9]{3,25})/i);
+   if(m)numberHit=m[1];
   }
  }
- const full=codeHit.value;
- return {formCode:full.slice(0,1),series:full.slice(1),number:numberHit?.value||'',reason:numberHit?'Đã tìm thấy nhãn Số/No và giá trị gần mã ký hiệu':'Tìm thấy ký hiệu nhưng chưa tìm thấy số gần nhãn Số/No'};
+ const full=seriesHit.value;
+ return {formCode:full.slice(0,1),series:full.slice(1),number:numberHit,reason:numberHit?'Đã nhận dạng từ cặp nhãn Ký hiệu và Số/No trong tiêu đề':'Đã nhận dạng ký hiệu nhưng chưa thấy giá trị sau nhãn Số/No'};
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
