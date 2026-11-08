@@ -75,47 +75,54 @@ function extractInvoiceIdCluster(source){
  const section=title?raw.slice(Math.max(0,title.index-1400),Math.min(raw.length,title.index+1400)):raw.slice(0,2200);
  const lines=section.split('\n').map(x=>x.replace(/[ \t]+/g,' ').trim()).filter(Boolean);
  const flat=section.replace(/[\t\r\n]+/g,' ').replace(/\s+/g,' ');
- const valueAfter=(labelRx,valueRx,range=2,stripRx=null)=>{
-  for(let i=0;i<lines.length;i++){
-   if(!labelRx.test(lines[i]))continue;
-   const first=stripRx?lines[i].replace(stripRx,''):lines[i].replace(labelRx,'');
-   const local=[first,...lines.slice(i+1,Math.min(lines.length,i+range+1))].join(' ').replace(/^\s*[:：-]\s*/,' ').trim();
-   const m=local.match(valueRx);
-   if(m)return m[1]||m[0];
+ let formCode='',series='',number='';
+ // Match the printed form+series token, e.g. "Ký hiệu: 1C26TLS" or
+ // bilingual "Ký hiệu (Sign): 1C26TNT". The leading 1 belongs in formCode.
+ const seriesLabel=/(?:Ký\s*hiệu(?:\s*\(\s*Sign\s*\))?|Serial\s*(?:No|number)?|Series)/i;
+ for(let i=0;i<lines.length;i++){
+  if(!seriesLabel.test(lines[i]))continue;
+  const labelLine=lines[i].replace(/^.*?(?:Ký\s*hiệu(?:\s*\(\s*Sign\s*\))?|Serial\s*(?:No|number)?|Series)\s*[:：]?\s*/i,'');
+  const candidate=(labelLine+' '+lines.slice(i+1,i+3).join(' ')).trim();
+  const m=candidate.match(/\b([0-9]{1,3})?([A-Z][A-Z0-9]{2,20})\b/i);
+  if(m){
+   formCode=m[1]||'';
+   series=(m[2]||'').toUpperCase();
+   break;
   }
-  return '';
- };
- // Form code and series are separate fields in this app's invoice table.
- const formCode=valueAfter(/Mẫu\s*số|Form\s*No|Form\s*number/i,/^\s*([0-9]{1,3})\b/i,2,/^.*?(?:Mẫu\s*số|Form\s*No|Form\s*number)\s*/i);
- const seriesLabel=/(?:Ký\s*hiệu|Serial\s*(?:No|number)?|Series)/i;
- const series=valueAfter(seriesLabel,/^\s*([A-Z][A-Z0-9]{2,20})\b/i,2,/^.*?(?:Ký\s*hiệu|Serial\s*(?:No|number)?|Series)\s*(?:HĐ|hóa\s*đơn)?\s*/i);
- let combined='';
- if(!series){
-  combined=valueAfter(seriesLabel,/^\s*([0-9][A-Z][A-Z0-9]{2,20})\b/i,2,/^.*?(?:Ký\s*hiệu|Serial\s*(?:No|number)?|Series)\s*(?:HĐ|hóa\s*đơn)?\s*/i);
  }
- // Accept only explicit invoice-number labels; never use account/tax identifiers.
- const numberLabel=/(?:Số\s*(?:hóa\s*đơn)?\s*(?:\(\s*No\s*\))?|Invoice\s*(?:No|number)|No)\s*[:：]\s*/gi;
- let number='';
- for(const hit of flat.matchAll(numberLabel)){
-  const before=flat.slice(Math.max(0,hit.index-55),hit.index);
-  const after=flat.slice(hit.index+hit[0].length,hit.index+hit[0].length+90);
-  if(/tài\s*khoản|mã\s*số\s*thuế|số\s*lượng|tổng\s*số/i.test(before))continue;
-  const n=after.match(/^\s*([0-9]{3,25})\b/);
+ // Some templates print "Mẫu số" separately. Prefer this explicit value
+ // when available, otherwise the first digit of the printed serial is form code.
+ for(let i=0;i<lines.length;i++){
+  if(!/Mẫu\s*số|Form\s*(?:No|number)/i.test(lines[i]))continue;
+  const candidate=lines[i].replace(/^.*?(?:Mẫu\s*số|Form\s*(?:No|number))\s*[:：]?\s*/i,'')+' '+lines.slice(i+1,i+3).join(' ');
+  const m=candidate.match(/^\s*([0-9]{1,3})\b/);
+  if(m){formCode=m[1];break;}
+ }
+ // Only accept a value explicitly tied to the invoice "Số" label.
+ // Deliberately do not treat table "(No)" item numbering as invoice number.
+ const numberLabel=/(?:Số\s*(?:hóa\s*đơn)?(?:\s*\(\s*No\s*\))?|Invoice\s*(?:No|number))\s*[:：]\s*/i;
+ for(let i=0;i<lines.length;i++){
+  const m=lines[i].match(numberLabel);
+  if(!m)continue;
+  const after=lines[i].slice(m.index+m[0].length);
+  let n=after.match(/^\s*([0-9]{3,25})\b/);
+  if(!n){
+   const next=lines.slice(i+1,i+3).join(' ');
+   n=next.match(/^\s*([0-9]{3,25})\b/);
+  }
   if(n){number=n[1];break;}
  }
- // If the label and value were emitted on separate PDF.js lines, inspect the
- // next two lines but still require the invoice-number label.
+ // PDF text may merge the title labels and values into one long line.
  if(!number){
-  for(let i=0;i<lines.length;i++){
-   if(!/(?:Số\s*(?:hóa\s*đơn)?\s*(?:\(\s*No\s*\))?|Invoice\s*(?:No|number)|No)\s*[:：]?/i.test(lines[i]))continue;
-   if(/tài\s*khoản|mã\s*số\s*thuế|số\s*lượng/i.test(lines[i]))continue;
-   const local=lines.slice(i,Math.min(lines.length,i+3)).join(' ');
-   const m=local.match(/(?:Số\s*(?:hóa\s*đơn)?\s*(?:\(\s*No\s*\))?|Invoice\s*(?:No|number)|No)\s*[:：]?\s*([0-9]{3,25})/i);
-   if(m){number=m[1];break;}
-  }
+  const m=flat.match(/(?:Số\s*(?:hóa\s*đơn)?(?:\s*\(\s*No\s*\))?|Invoice\s*(?:No|number))\s*[:：]\s*([0-9]{3,25})\b/i);
+  if(m)number=m[1];
  }
- if(!series&&combined)return {formCode:formCode||combined.slice(0,1),series:combined.slice(1).toUpperCase(),number,reason:number?'Đã nhận dạng số hóa đơn theo nhãn Số/No':'Thiếu số hóa đơn'};
- return {formCode:String(formCode||'').trim(),series:String(series||'').trim().toUpperCase(),number:String(number||'').trim(),reason:number?'Đã nhận dạng số hóa đơn theo nhãn Số/No':'Chưa tìm thấy số gắn với nhãn Số/No trong vùng tiêu đề'};
+ return {
+  formCode:String(formCode||'').trim(),
+  series:String(series||'').trim().toUpperCase(),
+  number:String(number||'').trim(),
+  reason:number?'Đã đọc số hóa đơn từ nhãn Số/No trong cụm tiêu đề':'Không tìm thấy số gắn với nhãn Số/No trong cụm tiêu đề'
+ };
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
