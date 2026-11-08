@@ -161,42 +161,12 @@ function parseText(t,file){
  // Layout-tolerant invoice identifier cluster.
  // PDF text engines can reorder labels and values: locate the series-shaped token
  // near either Vietnamese or English label, then its adjacent standalone number.
- const headerLines=lines.slice(0,Math.min(lines.length,100));
- const seriesLabel=/Ký hiệu|Sign\s*\)?\s*[:：]?/i;
- const numberLabel=/Số|No\s*\)?\s*[:：]?/i;
- let fullSeries='',number='',seriesLine=-1;
- const seriesRx=/\b([0-9][A-Z][A-Z0-9]{2,17})\b/i;
- // Find the explicit Ký hiệu label and the code within a compact neighborhood,
- // allowing the PDF text layer to place the code before the label.
- for(let i=0;i<headerLines.length&&!fullSeries;i++){
-  if(!/Ký hiệu|Sign/i.test(headerLines[i]))continue;
-  for(let d=0;d<=6&&!fullSeries;d++){
-   for(const j of d===0?[i]:[i+d,i-d]){
-    if(j<0||j>=headerLines.length)continue;
-    const m=headerLines[j].match(seriesRx);
-    if(m){fullSeries=m[1].toUpperCase();seriesLine=j;break;}
-   }
-  }
- }
- // Number must be a standalone digit token in the same small heading cluster.
- // A nearby explicit Số / No label is required, in either extracted text order.
- if(seriesLine>=0){
-  const clusterStart=Math.max(0,seriesLine-5),clusterEnd=Math.min(headerLines.length,seriesLine+6);
-  const cluster=headerLines.slice(clusterStart,clusterEnd);
-  const hasNumberLabel=cluster.some(x=>numberLabel.test(x));
-  if(hasNumberLabel){
-   const candidates=[];
-   for(let j=clusterStart;j<clusterEnd;j++){
-    if(Math.abs(j-seriesLine)>3)continue;
-    const q=headerLines[j].match(/^\s*([0-9]{5,25})\s*$/);
-    if(q)candidates.push({value:q[1],distance:Math.abs(j-seriesLine),index:j});
-   }
-   candidates.sort((x,y)=>x.distance-y.distance||x.index-y.index);
-   number=candidates[0]?.value||'';
-  }
- }
- const formCode=fullSeries&&/^\d[A-Z0-9]{3,17}$/i.test(fullSeries)?fullSeries.slice(0,1):'';
- const series=fullSeries&&formCode?fullSeries.slice(1):fullSeries;
+ // Reuse the strict heading recognizer for PDF text and OCR, so both paths
+ // apply exactly the same label-boundary rules and preserve leading zeroes.
+ const invoiceId=extractInvoiceIdCluster(raw);
+ const formCode=invoiceId.formCode||'';
+ const series=invoiceId.series||'';
+ const number=invoiceId.number||'';
  const orderNumber=first(raw,[/(?:Đơn\s*đặt\s*hàng|Purchase\s*order|PO\s*No\.?)\s*[:：]?\s*([A-Z0-9/-]{2,30})/i]);
  const dateRaw=first(raw,[/(?:Ngày(?:\s*\(Date\))?)\s*[:：]?\s*(\d{1,2}\s+tháng\s+\d{1,2}\s+năm\s+\d{4}|\d{1,2}[/. -]\d{1,2}[/. -]\d{4})/i]);
  let amount='';
