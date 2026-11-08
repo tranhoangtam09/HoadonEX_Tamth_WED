@@ -71,33 +71,30 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 // Multi-stage recognition: template-aware extraction + OCR fallback + confidence checks.
 function extractInvoiceIdCluster(source){
  const raw=String(source||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
- // Locate the first invoice heading. Include enough preceding lines because
- // PDF text extractors may put the title row just before the label/value row.
+ // Work only near the first invoice title; the seller header may appear before it.
  const title=/HÓA\s*ĐƠN|HOA\s*DON|VAT\s*Invoice/i.exec(raw);
- const section=title?raw.slice(Math.max(0,title.index-900),Math.min(raw.length,title.index+950)):raw.slice(0,1600);
+ const section=title?raw.slice(Math.max(0,title.index-1200),Math.min(raw.length,title.index+1200)):raw.slice(0,1800);
  const flat=section.replace(/[\t\r\n]+/g,' ').replace(/\s+/g,' ');
- // Extract series only when explicitly tied to the Ký hiệu/Sign label.
- const seriesRx=/(?:Ký\s*hiệu|Sign)\s*(?:\(\s*Sign\s*\))?\s*[:：]?\s*(\d[A-Z][A-Z0-9]{2,17})/i;
- let sm=flat.match(seriesRx);
- if(!sm)sm=flat.match(/(\d[A-Z][A-Z0-9]{2,17})\s*(?:\(\s*Sign\s*\))?\s*Ký\s*hiệu/i);
- if(!sm)return {formCode:'',series:'',number:'',reason:'Không tìm thấy mã ký hiệu gắn với nhãn Ký hiệu/Sign'};
- const full=String(sm[1]||sm[0].match(/\d[A-Z][A-Z0-9]{2,17}/i)?.[0]||'').toUpperCase();
- // A candidate invoice number must be on the same visual heading neighborhood
- // as the series and explicitly follow Số or No plus punctuation.
- const around=flat.slice(Math.max(0,sm.index-220),Math.min(flat.length,sm.index+sm[0].length+360));
- const numberLabel=/(?:\bSố\b\s*(?:\(\s*No\s*\))?|\bNo\b)\s*[:：]\s*/gi;
+ // Series is read only from the explicit Ký hiệu/Sign label.
+ const seriesRx=/(?:Ký\s*hiệu|Sign)\s*(?:\(\s*Sign\s*\))?\s*[:：]\s*(\d[A-Z][A-Z0-9]{2,17})/i;
+ const sm=flat.match(seriesRx);
+ if(!sm)return {formCode:'',series:'',number:'',reason:'Không tìm thấy ký hiệu sau nhãn Ký hiệu/Sign'};
+ const full=sm[1].toUpperCase();
+ // Number is read only from explicit Số (No): or Số: heading label.
+ const numberRx=/\bSố\b\s*(?:\(\s*No\s*\))?\s*[:：]\s*([0-9]{3,25})/i;
  let number='';
- for(const hit of around.matchAll(numberLabel)){
-  const prior=around.slice(Math.max(0,hit.index-48),hit.index);
-  if(/tài\s*khoản|mã\s*số\s*thuế|số\s*lượng|tổng\s*số/i.test(prior))continue;
-  const tail=around.slice(hit.index+hit[0].length,hit.index+hit[0].length+70);
-  const n=tail.match(/^\s*([0-9]{3,25})\b/);
-  if(n){number=n[1];break;}
+ const headingAfterSeries=flat.slice(sm.index+sm[0].length,sm.index+sm[0].length+500);
+ const nm=headingAfterSeries.match(numberRx);
+ if(nm)number=nm[1];
+ if(!number){
+  // Some PDF text layers reorder the two adjacent heading rows. Allow a nearby
+  // explicit label before the series but still require the same invoice heading.
+  const nearby=flat.slice(Math.max(0,sm.index-450),sm.index);
+  const prior=[...nearby.matchAll(/(?:\bSố\b\s*(?:\(\s*No\s*\))?|\bNo\b)\s*[:：]\s*([0-9]{3,25})/gi)];
+  if(prior.length)number=prior[prior.length-1][1];
  }
- return {
-  formCode:full.slice(0,1), series:full.slice(1), number,
-  reason:number?'Nhận dạng thành công từ nhãn Số/No cạnh ký hiệu hóa đơn':'Có ký hiệu nhưng không tìm thấy số theo nhãn Số/No'
- };
+ return {formCode:full.slice(0,1),series:full.slice(1),number,
+  reason:number?'Đã đọc số hóa đơn từ nhãn Số/No trong vùng tiêu đề':'Có ký hiệu nhưng chưa tìm thấy số hóa đơn sau nhãn Số/No'};
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
