@@ -70,54 +70,42 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 
 // Multi-stage recognition: template-aware extraction + OCR fallback + confidence checks.
 function extractInvoiceIdCluster(source){
- const raw=String(source||'').replace(/\\u00a0/g,' ').replace(/\\r/g,'\\n');
- // Invoice ID exists only in the invoice-heading block, before buyer/seller details.
- // Keep original newlines so a page's continuation/header repeats cannot contaminate it.
- const titleRx=/HÓA\\s*ĐƠN|HOA\\s*DON|VAT\\s*Invoice/i;
+ const raw=String(source||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
+ // Restrict extraction to the invoice heading; never mine random numbers from buyer data.
+ const titleRx=/HÓA\s*ĐƠN|HOA\s*DON|VAT\s*Invoice/i;
  const title=titleRx.exec(raw);
- const from=title?Math.max(0,title.index-120):0;
- const header=raw.slice(from,Math.min(raw.length,title?title.index+1500:1800));
- const lines=header.split('\\n').map(x=>clean(x)).filter(Boolean);
- const fullSeriesRx=/\\b(\\d[A-Z][A-Z0-9]{2,17})\\b/i;
- const candidates=[];
- // Find series only next to explicit Ký hiệu / Sign label; allow label and code
- // in same row or adjacent extracted rows. Exclude MST and unrelated identifiers.
+ const from=title?Math.max(0,title.index-180):0;
+ const header=raw.slice(from,Math.min(raw.length,title?title.index+1100:1400));
+ const flat=header.replace(/[\t ]+/g,' ').replace(/\n+/g,'\n');
+ const lines=flat.split('\n').map(x=>clean(x)).filter(Boolean);
+ const seriesRx=/\b(\d[A-Z][A-Z0-9]{2,17})\b/i;
+ let seriesHit=null;
  for(let i=0;i<lines.length;i++){
-  if(!/Ký\\s*hiệu|Sign/i.test(lines[i]))continue;
-  const area=[lines[i],lines[i-1]||'',lines[i+1]||''].join(' ');
-  const m=area.match(fullSeriesRx);
-  if(m)candidates.push({value:m[1].toUpperCase(),line:i});
+  if(!/Ký\s*hiệu|Sign/i.test(lines[i]))continue;
+  const block=[lines[i],lines[i+1]||'',lines[i-1]||''].join(' ');
+  const m=block.match(seriesRx);
+  if(m){seriesHit={value:m[1].toUpperCase(),line:i};break;}
  }
- let seriesHit=candidates[0]||null;
- // Fallback handles text layers where label and code are split into individual runs.
  if(!seriesHit){
-  const flat=header.replace(/[\\t ]+/g,' ');
-  const m=flat.match(/Ký\\s*hiệu(?:\\s*\\(\\s*Sign\\s*\\))?\\s*[:：]?\\s*(\\d[A-Z][A-Z0-9]{2,17})|(?:\\d[A-Z][A-Z0-9]{2,17})\\s*Ký\\s*hiệu/i);
-  if(m)seriesHit={value:(m[1]||m[0].match(/\\d[A-Z][A-Z0-9]{2,17}/i)[0]).toUpperCase(),line:0};
+  const m=flat.match(/Ký\s*hiệu(?:\s*\(\s*Sign\s*\))?\s*[:：]?\s*(\d[A-Z][A-Z0-9]{2,17})/i);
+  if(m)seriesHit={value:m[1].toUpperCase(),line:0};
  }
  if(!seriesHit)return {formCode:'',series:'',number:'',reason:'Không tìm thấy mã ký hiệu cạnh nhãn Ký hiệu/Sign trong tiêu đề'};
- // Search a bounded window after (or beside) the heading label for explicit Số/No.
- // Captures inline "Số (No): 00001036", "Số: 00004376", and wrapped label/value lines.
- const numberPatterns=[
-  /(?:^|[\\s|])Số\\s*(?:\\(\\s*No\\s*\\))?\\s*[:：]?\\s*([0-9]{3,25})(?=$|[\\s|])/i,
-  /(?:^|[\\s|])No\\s*[:：]?\\s*([0-9]{3,25})(?=$|[\\s|])/i,
-  /(?:^|[\\s|])Số\\s*(?:\\(\\s*No\\s*\\))?\\s*[:：]?\\s*\\n?\\s*([0-9]{3,25})(?=$|[\\s|])/i
- ];
- const seriesLine=seriesHit.line;
- const local=lines.slice(Math.max(0,seriesLine-1),Math.min(lines.length,seriesLine+5)).join(' ');
- let numberHit='';
- for(const rx of numberPatterns){const m=local.match(rx);if(m){numberHit=m[1];break;}}
- // A few PDF text layers put Số and No on one row and the value on the next row.
- if(!numberHit){
-  const idx=lines.findIndex((x,i)=>i>=Math.max(0,seriesLine-1)&&i<=seriesLine+4&&/(?:^|\\s)(?:Số|No)(?:\\s|:|$)/i.test(x));
-  if(idx>=0){
-   const area=lines.slice(idx,Math.min(lines.length,idx+3)).join(' ');
-   const m=area.match(/(?:Số|No)[^0-9]{0,40}([0-9]{3,25})/i);
-   if(m)numberHit=m[1];
+ // Find the explicit invoice-number label and its numeric value within the same heading.
+ const near=lines.slice(Math.max(0,seriesHit.line-1),Math.min(lines.length,seriesHit.line+7)).join(' ');
+ const numberRx=/(?:Số\s*(?:\(\s*No\s*\))?|No)\s*[:：]?\s*([0-9]{3,25})/i;
+ let m=near.match(numberRx);
+ if(!m){
+  // Handle PDF.js splitting "Số (No):" and its value into adjacent fragments/lines.
+  const labelIndex=lines.findIndex((x,i)=>i>=Math.max(0,seriesHit.line-1)&&i<=seriesHit.line+6&&/(?:^|\s)(?:Số|No)(?:\s|:|$)/i.test(x));
+  if(labelIndex>=0){
+   const window=lines.slice(labelIndex,Math.min(lines.length,labelIndex+3)).join(' ');
+   m=window.match(/(?:Số|No)[^0-9]{0,60}([0-9]{3,25})/i);
   }
  }
+ const number=m?m[1]:'';
  const full=seriesHit.value;
- return {formCode:full.slice(0,1),series:full.slice(1),number:numberHit,reason:numberHit?'Đã nhận dạng từ cặp nhãn Ký hiệu và Số/No trong tiêu đề':'Đã nhận dạng ký hiệu nhưng chưa thấy giá trị sau nhãn Số/No'};
+ return {formCode:full.slice(0,1),series:full.slice(1),number,reason:number?'Đã nhận dạng từ cặp nhãn Ký hiệu và Số/No trong tiêu đề':'Đã nhận dạng ký hiệu nhưng chưa thấy giá trị sau nhãn Số/No'};
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
