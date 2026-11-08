@@ -71,39 +71,36 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 // Multi-stage recognition: template-aware extraction + OCR fallback + confidence checks.
 function extractInvoiceIdCluster(source){
  const raw=String(source||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
- // Work on a normalized stream while preserving the heading boundary.
+ // Isolate the first invoice title and a small heading window, never the buyer table.
  const titleRx=/HÓA\s*ĐƠN|HOA\s*DON|VAT\s*Invoice/i;
  const title=titleRx.exec(raw);
  const from=title?Math.max(0,title.index-220):0;
- const header=raw.slice(from,Math.min(raw.length,title?title.index+1100:1400));
+ const header=raw.slice(from,Math.min(raw.length,title?title.index+900:1200));
  const flat=header.replace(/[\t\r\n]+/g,' ').replace(/\s+/g,' ');
- const seriesRx=/\b(\d[A-Z][A-Z0-9]{2,17})\b/i;
- const seriesLabel=/Ký\s*hiệu|Sign/i;
+ // Explicitly recognize the series label first; then read the series token in
+ // the same heading neighborhood. This avoids picking up account/tax numbers.
+ const seriesLabelRx=/Ký\s*hiệu|Sign/gi;
  let seriesHit=null;
- const labels=[...flat.matchAll(new RegExp(seriesLabel.source,'gi'))];
- for(const label of labels){
-  const lo=Math.max(0,label.index-100),hi=Math.min(flat.length,label.index+180);
-  const segment=flat.slice(lo,hi);
-  const m=segment.match(seriesRx);
-  if(m){seriesHit={value:m[1].toUpperCase(),index:lo+m.index};break;}
+ for(const label of flat.matchAll(seriesLabelRx)){
+  const area=flat.slice(Math.max(0,label.index-50),Math.min(flat.length,label.index+130));
+  const m=area.match(/\b(\d[A-Z][A-Z0-9]{2,17})\b/i);
+  if(m){seriesHit={value:m[1].toUpperCase(),index:label.index};break;}
  }
  if(!seriesHit)return {formCode:'',series:'',number:'',reason:'Không tìm thấy mã ký hiệu cạnh nhãn Ký hiệu/Sign trong tiêu đề'};
- // Search only the heading section and require the explicit Số or No label.
- // The digit run can be in the same text fragment or separated by arbitrary spaces.
- const numLabelRx=/(?:\bSố\b\s*(?:\(\s*No\s*\))?|\bNo\b)\s*[:：]?\s*/gi;
+ // Only look for the explicit invoice-number label immediately after the title.
+ // Do not treat generic "Số tài khoản", "Mã số thuế", or quantity labels as IDs.
+ const afterSeries=flat.slice(Math.max(0,seriesHit.index-120),Math.min(flat.length,seriesHit.index+520));
+ const numberLabelRx=/(?:\bSố\b\s*(?:\(\s*No\s*\))?|\bNo\b)\s*[:：]\s*/gi;
  let number='';
- for(const label of flat.matchAll(numLabelRx)){
-  const after=flat.slice(label.index+label[0].length,label.index+label[0].length+100);
-  const m=after.match(/^([0-9]{3,25})\b/);
-  if(m){
-   // Avoid the account number elsewhere in the heading: prioritize a number
-   // in the invoice-title cluster, close to the located series token.
-   const distance=Math.abs((label.index+label[0].length)-seriesHit.index);
-   if(distance<=420){number=m[1];break;}
-  }
+ for(const label of afterSeries.matchAll(numberLabelRx)){
+  const before=afterSeries.slice(Math.max(0,label.index-32),label.index);
+  if(/tài\s*khoản|mã\s*số\s*thuế|mã\s*số|số\s*lượng/i.test(before))continue;
+  const tail=afterSeries.slice(label.index+label[0].length,label.index+label[0].length+100);
+  const value=tail.match(/^\s*([0-9]{3,25})\b/);
+  if(value){number=value[1];break;}
  }
  const full=seriesHit.value;
- return {formCode:full.slice(0,1),series:full.slice(1),number,reason:number?'Đã nhận dạng từ nhãn Số/No cạnh ký hiệu trong tiêu đề':'Đã nhận dạng ký hiệu nhưng chưa thấy giá trị sau nhãn Số/No'};
+ return {formCode:full.slice(0,1),series:full.slice(1),number,reason:number?'Đã nhận dạng từ nhãn Số/No trong cụm tiêu đề':'Đã nhận dạng ký hiệu nhưng chưa thấy số đứng sau nhãn Số/No'};
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
