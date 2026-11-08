@@ -71,13 +71,12 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 // Multi-stage recognition: template-aware extraction + OCR fallback + confidence checks.
 function extractInvoiceIdCluster(source){
  const raw=String(source||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
- // Restrict extraction to the invoice heading; never mine random numbers from buyer data.
+ // Restrict extraction to the invoice heading; never mine numbers from buyer data.
  const titleRx=/HÓA\s*ĐƠN|HOA\s*DON|VAT\s*Invoice/i;
  const title=titleRx.exec(raw);
  const from=title?Math.max(0,title.index-180):0;
  const header=raw.slice(from,Math.min(raw.length,title?title.index+1100:1400));
- const flat=header.replace(/[\t ]+/g,' ').replace(/\n+/g,'\n');
- const lines=flat.split('\n').map(x=>clean(x)).filter(Boolean);
+ const lines=header.split('\n').map(x=>clean(x)).filter(Boolean);
  const seriesRx=/\b(\d[A-Z][A-Z0-9]{2,17})\b/i;
  let seriesHit=null;
  for(let i=0;i<lines.length;i++){
@@ -86,26 +85,18 @@ function extractInvoiceIdCluster(source){
   const m=block.match(seriesRx);
   if(m){seriesHit={value:m[1].toUpperCase(),line:i};break;}
  }
- if(!seriesHit){
-  const m=flat.match(/Ký\s*hiệu(?:\s*\(\s*Sign\s*\))?\s*[:：]?\s*(\d[A-Z][A-Z0-9]{2,17})/i);
-  if(m)seriesHit={value:m[1].toUpperCase(),line:0};
- }
  if(!seriesHit)return {formCode:'',series:'',number:'',reason:'Không tìm thấy mã ký hiệu cạnh nhãn Ký hiệu/Sign trong tiêu đề'};
- // Find the explicit invoice-number label and its numeric value within the same heading.
- const near=lines.slice(Math.max(0,seriesHit.line-1),Math.min(lines.length,seriesHit.line+7)).join(' ');
- const numberRx=/(?:Số\s*(?:\(\s*No\s*\))?|No)\s*[:：]?\s*([0-9]{3,25})/i;
- let m=near.match(numberRx);
+ // Build a compact heading window that permits values in the preceding/following row.
+ const near=lines.slice(Math.max(0,seriesHit.line-3),Math.min(lines.length,seriesHit.line+8)).join(' ');
+ // The invoice number label is mandatory. Do not use an unlabelled digit run.
+ let m=near.match(/(?:Số\s*(?:\(\s*No\s*\))?\s*[:：]?|No\s*[:：])\s*([0-9]{3,25})/i);
  if(!m){
-  // Handle PDF.js splitting "Số (No):" and its value into adjacent fragments/lines.
-  const labelIndex=lines.findIndex((x,i)=>i>=Math.max(0,seriesHit.line-1)&&i<=seriesHit.line+6&&/(?:^|\s)(?:Số|No)(?:\s|:|$)/i.test(x));
-  if(labelIndex>=0){
-   const window=lines.slice(labelIndex,Math.min(lines.length,labelIndex+3)).join(' ');
-   m=window.match(/(?:Số|No)[^0-9]{0,60}([0-9]{3,25})/i);
-  }
+  // PDF.js/OCR may split label, punctuation and value over two text fragments.
+  m=near.match(/(?:Số|No)[^0-9]{0,90}([0-9]{3,25})/i);
  }
  const number=m?m[1]:'';
  const full=seriesHit.value;
- return {formCode:full.slice(0,1),series:full.slice(1),number,reason:number?'Đã nhận dạng từ cặp nhãn Ký hiệu và Số/No trong tiêu đề':'Đã nhận dạng ký hiệu nhưng chưa thấy giá trị sau nhãn Số/No'};
+ return {formCode:full.slice(0,1),series:full.slice(1),number,reason:number?'Đã nhận dạng từ nhãn Số/No trong cụm tiêu đề hóa đơn':'Đã nhận dạng ký hiệu nhưng chưa thấy giá trị sau nhãn Số/No'};
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
