@@ -71,21 +71,21 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 // Multi-stage recognition: template-aware extraction + OCR fallback + confidence checks.
 function extractInvoiceIdCluster(source){
  const raw=String(source||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
- // Read MeInvoice's invoice-heading block from the text layer. The title is on
- // the same line as "Ký hiệu" and the following line (or same line) carries "Số".
+ // Preserve the heading boundary and stop at the issue date / buyer section.
  const title=/HÓA\s*ĐƠN|HOA\s*DON|VAT\s*Invoice/i.exec(raw);
- const heading=title?raw.slice(Math.max(0,title.index-180),Math.min(raw.length,title.index+700)):raw.slice(0,1000);
- const flat=heading.replace(/[\t\r\n]+/g,' ').replace(/\s+/g,' ');
+ const prefix=title?raw.slice(Math.max(0,title.index-160),title.index+700):raw.slice(0,1000);
+ const flat=prefix.replace(/[\t\r\n]+/g,' ').replace(/\s+/g,' ');
  const seriesMatch=flat.match(/Ký\s*hiệu(?:\s*\(\s*Sign\s*\))?\s*[:：]?\s*(\d[A-Z][A-Z0-9]{2,17})/i)
-   || flat.match(/(\d[A-Z][A-Z0-9]{2,17})\s*Ký\s*hiệu/i);
+  || flat.match(/(\d[A-Z][A-Z0-9]{2,17})\s*Ký\s*hiệu/i);
  if(!seriesMatch)return {formCode:'',series:'',number:'',reason:'Không tìm thấy mã sau nhãn Ký hiệu trong vùng tiêu đề'};
  const fullSeries=(seriesMatch[1]||seriesMatch[0].match(/\d[A-Z][A-Z0-9]{2,17}/i)[0]).toUpperCase();
- // Limit number search to the heading after the series. Require literal Số/No label.
- const after=flat.slice(seriesMatch.index+seriesMatch[0].length,seriesMatch.index+seriesMatch[0].length+300);
- const numberMatch=after.match(/(?:\bSố\b\s*(?:\(\s*No\s*\))?|\bNo\b)\s*[:：]?\s*([0-9]{3,25})/i);
- const number=numberMatch?numberMatch[1]:'';
+ const after=flat.slice(seriesMatch.index+seriesMatch[0].length,seriesMatch.index+seriesMatch[0].length+350);
+ // Accept both Số: 000... and Số (No): 000..., requiring a colon to avoid
+ // matching unrelated occurrences such as "Số tài khoản".
+ const numberMatch=after.match(/\bSố\b\s*(?:\(\s*No\s*\))?\s*[:：]\s*([0-9]{3,25})|\bNo\b\s*[:：]\s*([0-9]{3,25})/i);
+ const number=numberMatch?(numberMatch[1]||numberMatch[2]):'';
  return {formCode:fullSeries.slice(0,1),series:fullSeries.slice(1),number,
-  reason:number?'Đã nhận dạng số theo nhãn Số/No trong tiêu đề':'Đã nhận dạng ký hiệu nhưng chưa tìm thấy số sau nhãn Số/No'};
+  reason:number?'Đã đọc số hóa đơn theo nhãn Số/No trong tiêu đề':'Đã đọc ký hiệu nhưng chưa tìm thấy số sau nhãn Số/No'};
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
