@@ -97,8 +97,10 @@ function extractInvoiceIdCluster(source){
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
  const found=extractInvoiceIdCluster(record.raw);
+ // The strict title-label extraction is authoritative for invoice identifiers.
+ // Preserve leading zeros (e.g. 00001036); never coerce to Number.
  if(found.formCode&&found.series){record.formCode=found.formCode;record.series=found.series;}
- if(found.number)record.number=found.number;
+ if(found.number)record.number=String(found.number).trim();
  record.identifierEvidence=found;
  return record;
 }
