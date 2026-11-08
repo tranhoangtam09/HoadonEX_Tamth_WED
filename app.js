@@ -71,36 +71,38 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 // Multi-stage recognition: template-aware extraction + OCR fallback + confidence checks.
 function extractInvoiceIdCluster(source){
  const raw=String(source||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
- // Isolate the first invoice title and a small heading window, never the buyer table.
- const titleRx=/HÓA\s*ĐƠN|HOA\s*DON|VAT\s*Invoice/i;
- const title=titleRx.exec(raw);
- const from=title?Math.max(0,title.index-220):0;
- const header=raw.slice(from,Math.min(raw.length,title?title.index+900:1200));
- const flat=header.replace(/[\t\r\n]+/g,' ').replace(/\s+/g,' ');
- // Explicitly recognize the series label first; then read the series token in
- // the same heading neighborhood. This avoids picking up account/tax numbers.
- const seriesLabelRx=/Ký\s*hiệu|Sign/gi;
- let seriesHit=null;
- for(const label of flat.matchAll(seriesLabelRx)){
-  const area=flat.slice(Math.max(0,label.index-50),Math.min(flat.length,label.index+130));
-  const m=area.match(/\b(\d[A-Z][A-Z0-9]{2,17})\b/i);
-  if(m){seriesHit={value:m[1].toUpperCase(),index:label.index};break;}
+ // Locate the real heading row (title, series, and invoice number); do not scan
+ // buyer data or the invoice body for arbitrary digit strings.
+ const lines=raw.split('\n').map(x=>clean(x)).filter(Boolean);
+ const titleIndex=lines.findIndex(x=>/HÓA\s*ĐƠN|HOA\s*DON|VAT\s*Invoice/i.test(x));
+ const start=Math.max(0,titleIndex<0?0:titleIndex-2);
+ const end=Math.min(lines.length,titleIndex<0?12:titleIndex+12);
+ const heading=lines.slice(start,end);
+ const seriesRx=/\b(\d[A-Z][A-Z0-9]{2,17})\b/i;
+ let fullSeries='',seriesRow=-1;
+ for(let i=0;i<heading.length;i++){
+  if(!/Ký\s*hiệu|Sign/i.test(heading[i]))continue;
+  // Include same row plus two adjacent rows in case the PDF text layer splits fragments.
+  const m=[heading[i],heading[i-1]||'',heading[i+1]||'',heading[i+2]||''].join(' ').match(seriesRx);
+  if(m){fullSeries=m[1].toUpperCase();seriesRow=i;break;}
  }
- if(!seriesHit)return {formCode:'',series:'',number:'',reason:'Không tìm thấy mã ký hiệu cạnh nhãn Ký hiệu/Sign trong tiêu đề'};
- // Only look for the explicit invoice-number label immediately after the title.
- // Do not treat generic "Số tài khoản", "Mã số thuế", or quantity labels as IDs.
- const afterSeries=flat.slice(Math.max(0,seriesHit.index-120),Math.min(flat.length,seriesHit.index+520));
- const numberLabelRx=/(?:\bSố\b\s*(?:\(\s*No\s*\))?|\bNo\b)\s*[:：]\s*/gi;
+ if(!fullSeries)return {formCode:'',series:'',number:'',reason:'Không tìm thấy ký hiệu hóa đơn cạnh nhãn Ký hiệu/Sign'};
+ // First pass: standard inline labels "Số (No): 00001036" and "Số: 00004376".
  let number='';
- for(const label of afterSeries.matchAll(numberLabelRx)){
-  const before=afterSeries.slice(Math.max(0,label.index-32),label.index);
-  if(/tài\s*khoản|mã\s*số\s*thuế|mã\s*số|số\s*lượng/i.test(before))continue;
-  const tail=afterSeries.slice(label.index+label[0].length,label.index+label[0].length+100);
-  const value=tail.match(/^\s*([0-9]{3,25})\b/);
-  if(value){number=value[1];break;}
+ const h=heading.join(' ');
+ const m=h.match(/(?:\bSố\b\s*(?:\(\s*No\s*\))?|\bNo\b)\s*[:：]\s*([0-9]{3,25})/i);
+ if(m)number=m[1];
+ // Second pass: PDF.js can emit the label and numeric value as separate text rows.
+ if(!number){
+  for(let i=0;i<heading.length;i++){
+   if(!/(?:^|\s)Số(?:\s|\(|:|$)|(?:^|\s)No(?:\s|\)|:|$)/i.test(heading[i]))continue;
+   const local=[heading[i],heading[i+1]||'',heading[i+2]||''].join(' ');
+   const value=local.match(/(?:Số|No)[^0-9]{0,70}([0-9]{3,25})/i);
+   if(value){number=value[1];break;}
+  }
  }
- const full=seriesHit.value;
- return {formCode:full.slice(0,1),series:full.slice(1),number,reason:number?'Đã nhận dạng từ nhãn Số/No trong cụm tiêu đề':'Đã nhận dạng ký hiệu nhưng chưa thấy số đứng sau nhãn Số/No'};
+ const full=fullSeries;
+ return {formCode:full.slice(0,1),series:full.slice(1),number,reason:number?'Nhận dạng theo nhãn Số/No trong cụm tiêu đề hóa đơn':'Đã có ký hiệu nhưng chưa đọc được số sau nhãn Số/No'};
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
