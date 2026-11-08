@@ -75,50 +75,47 @@ function extractInvoiceIdCluster(source){
  const section=title?raw.slice(Math.max(0,title.index-1400),Math.min(raw.length,title.index+1400)):raw.slice(0,2200);
  const lines=section.split('\n').map(x=>x.replace(/[ \t]+/g,' ').trim()).filter(Boolean);
  const flat=section.replace(/[\t\r\n]+/g,' ').replace(/\s+/g,' ');
- // In this invoice layout, form code (Mẫu số) and series (Ký hiệu) are
- // separate fields: e.g. Mẫu số=1, Ký hiệu=C26TNT.
- const findLabelValue=(labelRx,valueRx,range=2)=>{
+ const valueAfter=(labelRx,valueRx,range=2,stripRx=null)=>{
   for(let i=0;i<lines.length;i++){
    if(!labelRx.test(lines[i]))continue;
-   const local=lines.slice(i,Math.min(lines.length,i+range+1)).join(' ');
+   const first=stripRx?lines[i].replace(stripRx,''):lines[i].replace(labelRx,'');
+   const local=[first,...lines.slice(i+1,Math.min(lines.length,i+range+1))].join(' ').replace(/^\s*[:：-]\s*/,' ').trim();
    const m=local.match(valueRx);
    if(m)return m[1]||m[0];
   }
   return '';
  };
- let formCode=findLabelValue(/Mẫu\s*số|Form\s*No|Form\s*number/i,/[:：]?\s*([0-9]{1,3})\b/i,2);
- let series=findLabelValue(/Ký\s*hiệu|Serial\s*(?:No|number)?|Series/i,/[:：]?\s*([A-Z][A-Z0-9]{2,20})\b/i,2);
- // Also accept combined form+series values such as 1C26TNT.
+ // Form code and series are separate fields in this app's invoice table.
+ const formCode=valueAfter(/Mẫu\s*số|Form\s*No|Form\s*number/i,/^\s*([0-9]{1,3})\b/i,2,/^.*?(?:Mẫu\s*số|Form\s*No|Form\s*number)\s*/i);
+ const seriesLabel=/(?:Ký\s*hiệu|Serial\s*(?:No|number)?|Series)/i;
+ const series=valueAfter(seriesLabel,/^\s*([A-Z][A-Z0-9]{2,20})\b/i,2,/^.*?(?:Ký\s*hiệu|Serial\s*(?:No|number)?|Series)\s*(?:HĐ|hóa\s*đơn)?\s*/i);
+ let combined='';
  if(!series){
-  const combined=findLabelValue(/Ký\s*hiệu|Serial\s*(?:No|number)?|Series/i,/[:：]?\s*([0-9][A-Z][A-Z0-9]{2,20})\b/i,2);
-  if(combined){formCode=formCode||combined.slice(0,1);series=combined.slice(1);}
+  combined=valueAfter(seriesLabel,/^\s*([0-9][A-Z][A-Z0-9]{2,20})\b/i,2,/^.*?(?:Ký\s*hiệu|Serial\s*(?:No|number)?|Series)\s*(?:HĐ|hóa\s*đơn)?\s*/i);
  }
- // Search explicit invoice-number labels; allow PDF.js to split label/value
- // into separate text fragments or adjacent lines. Do not use arbitrary numbers.
- const numberPatterns=[
-  /(?:Số\s*(?:hóa\s*đơn)?\s*(?:\(\s*No\s*\))?|Invoice\s*(?:No|number)|No)\s*[:：]?\s*([0-9]{3,25})/i,
-  /(?:Số\s*(?:hóa\s*đơn)?\s*(?:\(\s*No\s*\))?|Invoice\s*(?:No|number)|No)[^0-9]{0,90}([0-9]{3,25})/i
- ];
+ // Accept only explicit invoice-number labels; never use account/tax identifiers.
+ const numberLabel=/(?:Số\s*(?:hóa\s*đơn)?\s*(?:\(\s*No\s*\))?|Invoice\s*(?:No|number)|No)\s*[:：]\s*/gi;
  let number='';
- for(const rx of numberPatterns){
-  const m=flat.match(rx);
-  if(m){number=m[1];break;}
+ for(const hit of flat.matchAll(numberLabel)){
+  const before=flat.slice(Math.max(0,hit.index-55),hit.index);
+  const after=flat.slice(hit.index+hit[0].length,hit.index+hit[0].length+90);
+  if(/tài\s*khoản|mã\s*số\s*thuế|số\s*lượng|tổng\s*số/i.test(before))continue;
+  const n=after.match(/^\s*([0-9]{3,25})\b/);
+  if(n){number=n[1];break;}
  }
- // Separate line fallback: label row followed by a numeric-only row.
+ // If the label and value were emitted on separate PDF.js lines, inspect the
+ // next two lines but still require the invoice-number label.
  if(!number){
   for(let i=0;i<lines.length;i++){
-   if(!/(?:^|\b)(?:Số(?:\s*hóa\s*đơn)?|Invoice\s*(?:No|number)|No)(?:\b|\s|\()/i.test(lines[i]))continue;
+   if(!/(?:Số\s*(?:hóa\s*đơn)?\s*(?:\(\s*No\s*\))?|Invoice\s*(?:No|number)|No)\s*[:：]?/i.test(lines[i]))continue;
+   if(/tài\s*khoản|mã\s*số\s*thuế|số\s*lượng/i.test(lines[i]))continue;
    const local=lines.slice(i,Math.min(lines.length,i+3)).join(' ');
-   const m=local.match(/(?:Số(?:\s*hóa\s*đơn)?|Invoice\s*(?:No|number)|No)[^0-9]{0,90}([0-9]{3,25})/i);
+   const m=local.match(/(?:Số\s*(?:hóa\s*đơn)?\s*(?:\(\s*No\s*\))?|Invoice\s*(?:No|number)|No)\s*[:：]?\s*([0-9]{3,25})/i);
    if(m){number=m[1];break;}
   }
  }
- return {
-  formCode:String(formCode||'').trim(),
-  series:String(series||'').trim().toUpperCase(),
-  number:String(number||'').trim(),
-  reason:number?'Đã nhận dạng số hóa đơn theo nhãn Số/No': 'Chưa tìm thấy số gắn với nhãn Số/No trong vùng tiêu đề'
- };
+ if(!series&&combined)return {formCode:formCode||combined.slice(0,1),series:combined.slice(1).toUpperCase(),number,reason:number?'Đã nhận dạng số hóa đơn theo nhãn Số/No':'Thiếu số hóa đơn'};
+ return {formCode:String(formCode||'').trim(),series:String(series||'').trim().toUpperCase(),number:String(number||'').trim(),reason:number?'Đã nhận dạng số hóa đơn theo nhãn Số/No':'Chưa tìm thấy số gắn với nhãn Số/No trong vùng tiêu đề'};
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
