@@ -71,23 +71,26 @@ return {file,sellerTax,seller:clean(seller),buyerTax,buyer:clean(buyer),formCode
 // Multi-stage recognition: template-aware extraction + OCR fallback + confidence checks.
 function extractInvoiceIdCluster(source){
  const raw=String(source||'').replace(/\u00a0/g,' ').replace(/\r/g,'\n');
- // Search a bounded prefix where MeInvoice prints invoice series and invoice number.
+ // Isolate the invoice-heading section; it starts at the invoice title.
  const title=/HÓA\s*ĐƠN|HOA\s*DON|VAT\s*Invoice/i.exec(raw);
- const prefix=raw.slice(0,Math.min(raw.length,title?title.index+950:1800));
- const flat=prefix.replace(/[\t\r\n]+/g,' ').replace(/\s+/g,' ');
- const seriesLabel=/(?:Ký\s*hiệu|Sign)\s*[:：]?\s*/gi;
- let fullSeries='',seriesAt=-1;
- for(const label of flat.matchAll(seriesLabel)){
-  const tail=flat.slice(label.index+label[0].length,label.index+label[0].length+100);
-  const m=tail.match(/^(\d[A-Z][A-Z0-9]{2,17})\b/i);
-  if(m){fullSeries=m[1].toUpperCase();seriesAt=label.index+label[0].length;break;}
+ const section=title?raw.slice(Math.max(0,title.index-160),Math.min(raw.length,title.index+900)):raw.slice(0,1200);
+ const flat=section.replace(/[\t\r\n]+/g,' ').replace(/\s+/g,' ');
+ const seriesLabel=/Ký\s*hiệu(?:\s*\(\s*Sign\s*\))?|Sign\s*\)?\s*[:：]?/i;
+ const seriesMatch=flat.match(/(?:Ký\s*hiệu(?:\s*\(\s*Sign\s*\))?|Sign\s*\)?\s*[:：]?)\s*[:：]?\s*(\d[A-Z][A-Z0-9]{2,17})/i);
+ if(!seriesMatch){
+  return {formCode:'',series:'',number:'',reason:'Không tìm thấy mã ký hiệu ngay sau nhãn Ký hiệu/Sign'};
  }
- if(!fullSeries)return {formCode:'',series:'',number:'',reason:'Không tìm thấy mã ký hiệu đứng sau nhãn Ký hiệu/Sign'};
- // Invoice number must be explicitly linked to Số/No and appear after series.
- const tail=flat.slice(seriesAt,Math.min(flat.length,seriesAt+320));
- const m=tail.match(/(?:\bSố\b\s*(?:\(\s*No\s*\))?|\bNo\b)\s*[:：]\s*([0-9]{3,25})/i);
- const number=m?m[1]:'';
- return {formCode:fullSeries.slice(0,1),series:fullSeries.slice(1),number,reason:number?'Đã đọc cặp Ký hiệu và Số/No trong vùng tiêu đề hóa đơn':'Đã đọc ký hiệu nhưng chưa tìm thấy số gắn với nhãn Số/No'};
+ const fullSeries=seriesMatch[1].toUpperCase();
+ // Take only the text after the located series token and require the invoice label.
+ const afterSeries=flat.slice(seriesMatch.index+seriesMatch[0].length,seriesMatch.index+seriesMatch[0].length+260);
+ const numberMatch=afterSeries.match(/(?:\bSố\b\s*(?:\(\s*No\s*\))?|\bNo\b)\s*[:：]\s*([0-9]{3,25})/i);
+ const number=numberMatch?numberMatch[1]:'';
+ return {
+  formCode:fullSeries.slice(0,1),
+  series:fullSeries.slice(1),
+  number,
+  reason:number?'Đã đọc đúng số đứng sau nhãn Số/No trong tiêu đề hóa đơn':'Đã đọc ký hiệu nhưng chưa tìm thấy số đứng sau nhãn Số/No'
+ };
 }
 function applyInvoiceIdCluster(record){
  if(!record||!record.raw)return record;
